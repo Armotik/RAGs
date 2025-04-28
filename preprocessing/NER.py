@@ -1,5 +1,6 @@
 import pandas as pd
 import spacy
+from transformers import AutoTokenizer, AutoModelForTokenClassification, pipeline
 
 _nlp_models = {}
 
@@ -12,33 +13,72 @@ def get_nlp(lang : str) -> spacy.Language:
     if lang not in _nlp_models:
         _nlp_models[lang] = spacy.load(
             "fr_core_news_sm" if lang == "fr" else "en_core_web_sm",
-            disable=["tagger", "parser"]
         )
     return _nlp_models[lang]
 
-def enrich_df_with_ner_pipe(df_chunk : pd.DataFrame) -> pd.DataFrame: # À AMÉLIORER
+def post_treatment_bert_entities(entities: list[tuple[str, str]]) -> list[tuple[str, str]]:
     """
-    Enrich the dataframe with named entity recognition (NER) using spaCy.
-    :param df_chunk: the dataframe chunk to enrich
-    :return: the enriched dataframe chunk
+    Post-process the entities detected by BERT to clean them up before sending them to spaCy.
+    :param entities: the list of entities detected by BERT
+    :return: the cleaned list of entities
     """
-    enriched_rows = []
+    cleaned = []
+    current = ""
+    label = None
 
-    for lang in ["fr", "en"]:
-        sub_df = df_chunk[df_chunk["meta"].apply(lambda m: m.get("lang") == lang)]
-        if sub_df.empty:
-            continue
+    for word, tag in entities:
+        if word.startswith("##"):
+            current += word[2:]
+        else:
+            if current:
+                cleaned.append((current.strip(), label))
+            current = word
+            label = tag
 
-        nlp = get_nlp(lang)
-        texts = sub_df["text"].tolist()
-        metas = sub_df["meta"].tolist()
+    if current:
+        cleaned.append((current.strip(), label))
 
-        docs = list(nlp.pipe(texts, batch_size=256))
+    cleaned = [(w, t) for w, t in cleaned if len(w) > 2 and w.lower() not in {"l'", "’", "le", "la"}]
 
-        for meta, doc in zip(metas, docs):
-            entities = [{"text": ent.text, "label": ent.label_} for ent in doc.ents]
-            meta = meta.copy()
-            meta["entities"] = entities
-            enriched_rows.append({"text": doc.text, "meta": meta})
+    return cleaned
 
-    return pd.DataFrame(enriched_rows)
+def enrich_df_with_ner_pipe(df_chunk: pd.DataFrame) -> pd.DataFrame:
+    """
+    Enrich the DataFrame with Named Entity Recognition (NER) using BERT and spaCy.
+    :param df_chunk: the DataFrame to enrich
+    :return: the enriched DataFrame
+    """
+    tokenizer = AutoTokenizer.from_pretrained("dslim/bert-large-NER")
+    model = AutoModelForTokenClassification.from_pretrained("dslim/bert-large-NER")
+    bert_ner = pipeline("ner", model=model, tokenizer=tokenizer, aggregation_strategy="simple")
+
+    entities_all = []
+
+    for index, row in df_chunk.iterrows():
+
+        text = row["text"]
+        lang = row["meta"]["lang"]
+
+        # BERT NER
+        ents = [(ent['word'], ent['entity_group']) for ent in bert_ner(text)]
+        ents = post_treatment_bert_entities(ents)
+
+        final_ents = []
+        for ent_text, ent_label in ents:
+            if ent_label == "None" or ent_label == "DATE": # skip None labels and DATE (Date Extraction is handled separately)
+                continue
+            if ent_label == "MISC":
+                spacy_nlp = get_nlp(lang)
+                doc = spacy_nlp(ent_text)
+                sub_ents = [(e.text, e.label_) for e in doc.ents]
+                if sub_ents:
+                    final_ents.extend(sub_ents)
+            else:
+                final_ents.append((ent_text, ent_label))
+
+        entities_all.append(final_ents)
+
+    df_chunk = df_chunk.copy()
+    df_chunk["entities"] = entities_all
+    return df_chunk
+

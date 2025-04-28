@@ -6,7 +6,7 @@ from tqdm import tqdm
 from .chunking import chunking
 from .content_extraction import load_lang
 from .text_cleaning import clean_text
-from .date_extraction import parallel_enrich_meta
+from .date_extraction import extract_date
 from .NER import enrich_df_with_ner_pipe
 
 def preprocess_data(languages: list[str], max_docs_per_lang: int, nb_chunk:int) -> pd.DataFrame:
@@ -18,11 +18,15 @@ def preprocess_data(languages: list[str], max_docs_per_lang: int, nb_chunk:int) 
     :return: a pandas DataFrame containing all documents
     """
 
+    print("Loading documents...")
+
     results = Parallel(n_jobs=len(languages))(
         delayed(load_lang)(lang, max_docs_per_lang) for lang in languages
     )
 
     all_docs = [doc for lang_docs in results for doc in lang_docs]
+
+    print("Documents loaded.")
 
     df = pd.DataFrame(all_docs)
     df["title"] = df["title"].apply(clean_text)
@@ -30,9 +34,13 @@ def preprocess_data(languages: list[str], max_docs_per_lang: int, nb_chunk:int) 
 
     df_chunk = chunking(df, 0)
 
-    df_chunk = parallel_enrich_meta(df_chunk)
+    print("Enriching metadata (dates) ...")
+
+    df_chunk = extract_date(df_chunk)
 
     chunks = np.array_split(df_chunk, nb_chunk)
+
+    print("Enriching metadata (NER) ...")
 
     results = Parallel(n_jobs=8, backend="loky", prefer="processes")(
         delayed(enrich_df_with_ner_pipe)(chunk) for chunk in tqdm(chunks)
