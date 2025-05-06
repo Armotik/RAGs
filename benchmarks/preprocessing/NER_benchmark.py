@@ -452,7 +452,7 @@ def process_row(row):
     for name, (model_lang, model_id, framework) in models.items():
         if model_lang != lang and model_lang != "multilingual":
             continue
-        result = process_model(model_id, framework, text, model_name)
+        result = process_model(model_id, framework, text, name)
         row_results.append({
             "docid": docid,
             "text": text,
