@@ -361,9 +361,9 @@ def run_transformers(model_name, text):
 def process_model(model_id, framework, text, model_name):
     start = time()
     if framework == "transformers":
-        entities = run_transformers(model_name, text)
+        entities = run_transformers(model_id, text)
     else:
-        entities = run_spacy(model_name, text)
+        entities = run_spacy(model_id, text)
     duration = time() - start
 
     tfidf = compute_tfidf(entities)
