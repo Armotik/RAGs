@@ -435,7 +435,8 @@ def refine_with_spacy(base_entities, base_model_name, base_lang, text_lang):
             all_refined_entities.extend(refined_entities)
 
         # cas 4 : nouvelles entités globales dans tout le texte
-        global_refined = run_spacy(spa_model_id, " ".join(base_entities))
+        entity_texts = [e[0] if isinstance(e, tuple) else e for e in base_entities]
+        global_refined = run_spacy(spa_model_id, " ".join(entity_texts))
         for new_ent in global_refined:
             if new_ent not in base_entity_set and new_ent not in all_refined_entities:
                 refinements.append({
