@@ -37,7 +37,7 @@ def load_lang(lang: str, max_docs: int) -> list:
     return docs
 
 languages = ['fr', 'en']
-max_docs_per_lang = 20  # taille du dataset (x2 car français + anglais)
+max_docs_per_lang = 50000  # taille du dataset (x2 car français + anglais)
 
 results = Parallel(n_jobs=len(languages))(
     delayed(load_lang)(lang, max_docs_per_lang) for lang in languages
