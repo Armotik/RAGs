@@ -301,25 +301,27 @@ def load_transformers_pipeline(model_name):
     return pipeline("ner", model=model, tokenizer=tokenizer, grouped_entities=True)
 
 def compute_tfidf(entities):
-    if not entities or all(e.strip() == "" for e in entities):
+    tokens = [e[0] for e in entities]  # extraire les textes
+    if not tokens or all(e.strip() == "" for e in tokens):
         return 0.0
     try:
-        tfidf = TfidfVectorizer().fit_transform([" ".join(entities)])
+        tfidf = TfidfVectorizer().fit_transform([" ".join(tokens)])
         return float(np.mean(tfidf.sum(axis=1)))
     except ValueError:
         return 0.0
 
 
 def compute_seqscore_contextual(text, entities):
-    if not entities:
+    tokens = [e[0] for e in entities]
+    if not tokens:
         return {"avg_len": 0, "uniq_ratio": 0, "context_sim": 0}
 
-    lengths = [len(e.split()) for e in entities]
-    uniq_ratio = len(set(entities)) / len(entities)
+    lengths = [len(e.split()) for e in tokens]
+    uniq_ratio = len(set(tokens)) / len(tokens)
 
     try:
         context_vec = TfidfVectorizer().fit_transform([text])
-        entity_vec = TfidfVectorizer().fit_transform(entities)
+        entity_vec = TfidfVectorizer().fit_transform(tokens)
         sim = float(np.mean(context_vec.dot(entity_vec.T).toarray()))
     except ValueError:
         sim = 0.0
@@ -330,28 +332,23 @@ def compute_seqscore_contextual(text, entities):
         "context_sim": sim
     }
 
+
 def compute_avg_entity_length(entities):
-    if not entities:
-        return 0.0
-    return float(np.mean([len(e) for e in entities if isinstance(e, str)]))
+    return float(np.mean([len(e[0]) for e in entities if isinstance(e[0], str)])) if entities else 0.0
+
 
 def compute_entity_stability(entities_base, entities_secondary):
-    if not entities_base or not entities_secondary:
-        return 0.0
-    set_base = set(entities_base)
-    set_secondary = set(entities_secondary)
-    intersection = set_base.intersection(set_secondary)
-    union = set_base.union(set_secondary)
-    return len(intersection) / len(union) if union else 0.0
-
+    base_set = set(e[0] for e in entities_base)
+    sec_set = set(e[0] for e in entities_secondary)
+    return len(base_set & sec_set) / len(base_set | sec_set) if base_set | sec_set else 0.0
 
 def run_spacy(model_name, text):
     nlp = load_spacy_model(model_name)
-    return [ent.text for ent in nlp(text).ents]
+    return [(ent.text, ent.label_) for ent in nlp(text).ents]
 
 def run_transformers(model_name, text):
     pipe = load_transformers_pipeline(model_name)
-    return [r["word"] for r in pipe(text)]
+    return [(ent["word"], ent["entity_group"]) for ent in pipe(text)]
 
 
 def process_model(model_id, framework, text):
@@ -377,26 +374,41 @@ def process_model(model_id, framework, text):
 
 def refine_with_spacy(base_entities, base_model_name, base_lang, text_lang):
     refinements = []
+
     for ent in base_entities:
         for spa_name, (spa_lang, spa_model_id, spa_framework) in models.items():
             if spa_framework == "spacy" and spa_lang == text_lang:
-                r = process_model(spa_model_id, "spacy", ent)
-                refinements.append({
-                    "text": ent,
-                    "text_lang": text_lang,
-                    "model": f"{base_model_name} → {spa_name}",
-                    "phase": "refinement_with_spacy",
-                    "duration": r["duration"],
-                    "entity_count": len(r["entities"]),
-                    "tfidf_score": r["tfidf_score"],
-                    "seq_avg_len": r["seq_avg_len"],
-                    "seq_uniq_ratio": r["seq_uniq_ratio"],
-                    "seq_context_sim": r["seq_context_sim"],
-                    "avg_entity_length": r["avg_entity_length"],
-                    "entity_stability": compute_entity_stability(base_entities, r["entities"]),
-                    "entities": r["entities"]
-                })
+                refined_entities = run_spacy(spa_model_id, ent)
+
+                if ent in refined_entities:
+                    # Même entité reconnue → ne rien ajouter
+                    continue
+                elif not refined_entities:
+                    # Non reconnue → suppression (optionnel : logguer)
+                    continue
+                else:
+                    # Remplacée → on ajoute la nouvelle entité
+                    tfidf2 = compute_tfidf(refined_entities)
+                    seq2 = compute_seqscore_contextual(ent, refined_entities)
+
+                    refinements.append({
+                        "text": ent,
+                        "text_lang": text_lang,
+                        "model": f"{base_model_name} → {spa_name}",
+                        "phase": "refinement_with_spacy",
+                        "duration": 0.0,
+                        "entity_count": len(refined_entities),
+                        "tfidf_score": tfidf2,
+                        "seq_avg_len": seq2["avg_len"],
+                        "seq_uniq_ratio": seq2["uniq_ratio"],
+                        "seq_context_sim": seq2["context_sim"],
+                        "avg_entity_length": compute_avg_entity_length(refined_entities),
+                        "entity_stability": compute_entity_stability([ent], refined_entities),
+                        "entities": refined_entities
+                    })
+
     return refinements
+
 
 def process_row(row):
     text = row["text"]
@@ -411,6 +423,7 @@ def process_row(row):
         entities = result["entities"]
 
         row_results.append({
+            "docid": row["meta"]["docid"],
             "text": text,
             "text_lang": lang,
             "model": name,
