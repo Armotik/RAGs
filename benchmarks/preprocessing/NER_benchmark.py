@@ -298,11 +298,25 @@ def compute_tfidf(entities):
     except ValueError:
         return 0.0
 
-def compute_seq_score(entity_list):
-    lengths = [len(ent.split()) for ent in entity_list]
+
+def compute_seqscore_contextual(text, entities):
+    if not entities:
+        return {"avg_len": 0, "uniq_ratio": 0, "context_sim": 0}
+
+    lengths = [len(e.split()) for e in entities]
+    uniq_ratio = len(set(entities)) / len(entities)
+
+    try:
+        context_vec = TfidfVectorizer().fit_transform([text])
+        entity_vec = TfidfVectorizer().fit_transform(entities)
+        sim = float(np.mean(context_vec.dot(entity_vec.T).toarray()))
+    except ValueError:
+        sim = 0.0
+
     return {
-        "avg_len": np.mean(lengths) if lengths else 0,
-        "uniq_ratio": len(set(entity_list)) / len(entity_list) if entity_list else 0
+        "avg_len": np.mean(lengths),
+        "uniq_ratio": uniq_ratio,
+        "context_sim": sim
     }
 
 def compute_avg_entity_length(entities):
