@@ -13,6 +13,7 @@ from transformers import pipeline, AutoModelForTokenClassification, AutoTokenize
 from sklearn.feature_extraction.text import TfidfVectorizer
 from tqdm import tqdm
 import torch
+from functools import lru_cache
 
 def load_lang(lang: str, max_docs: int) -> list:
     """
@@ -272,7 +273,7 @@ df_chunk = extract_date(df_chunk)
 
 print("[INFO] Extraction des dates terminée.")
 
-chunks = np.array_split(df_chunk, 256)
+chunks = np.array_split(df_chunk, 2)
 
 models = {
     "spacy-fr-core-news-md": ["fr", "fr_core_news_sm", "spacy"],
@@ -288,6 +289,16 @@ models = {
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 print("[INFO] Device utilisé :", device)
+
+@lru_cache(maxsize=None)
+def load_spacy_model(model_name):
+    return spacy.load(model_name)
+
+@lru_cache(maxsize=None)
+def load_transformers_pipeline(model_name):
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    model = AutoModelForTokenClassification.from_pretrained(model_name)
+    return pipeline("ner", model=model, tokenizer=tokenizer, grouped_entities=True)
 
 def compute_tfidf(entities):
     if not entities or all(e.strip() == "" for e in entities):
@@ -334,90 +345,100 @@ def compute_entity_stability(entities_base, entities_secondary):
     return len(intersection) / len(union) if union else 0.0
 
 
-def run_transformers(model_name, text):
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
-    model = AutoModelForTokenClassification.from_pretrained(model_name)
-    pipe = pipeline("ner", model=model, tokenizer=tokenizer, grouped_entities=True)
-    results = pipe(text)
-    entities = [r["word"] for r in results]
-    return entities
-
 def run_spacy(model_name, text):
-    nlp = spacy.load(model_name)
-    doc = nlp(text)
-    entities = [ent.text for ent in doc.ents]
-    return entities
+    nlp = load_spacy_model(model_name)
+    return [ent.text for ent in nlp(text).ents]
 
-def process_row(row, models):
+def run_transformers(model_name, text):
+    pipe = load_transformers_pipeline(model_name)
+    return [r["word"] for r in pipe(text)]
+
+
+def process_model(model_id, framework, text):
+    start = time()
+    if framework == "transformers":
+        entities = run_transformers(model_id, text)
+    else:
+        entities = run_spacy(model_id, text)
+    duration = time() - start
+
+    tfidf = compute_tfidf(entities)
+    seq = compute_seqscore_contextual(text, entities)
+
+    return {
+        "entities": entities,
+        "duration": duration,
+        "tfidf_score": tfidf,
+        "seq_avg_len": seq["avg_len"],
+        "seq_uniq_ratio": seq["uniq_ratio"],
+        "seq_context_sim": seq["context_sim"],
+        "avg_entity_length": compute_avg_entity_length(entities)
+    }
+
+def refine_with_spacy(base_entities, base_model_name, base_lang, text_lang):
+    refinements = []
+    for ent in base_entities:
+        for spa_name, (spa_lang, spa_model_id, spa_framework) in models.items():
+            if spa_framework == "spacy" and spa_lang == text_lang:
+                r = process_model(spa_model_id, "spacy", ent)
+                refinements.append({
+                    "text": ent,
+                    "text_lang": text_lang,
+                    "model": f"{base_model_name} → {spa_name}",
+                    "phase": "refinement_with_spacy",
+                    "duration": r["duration"],
+                    "entity_count": len(r["entities"]),
+                    "tfidf_score": r["tfidf_score"],
+                    "seq_avg_len": r["seq_avg_len"],
+                    "seq_uniq_ratio": r["seq_uniq_ratio"],
+                    "seq_context_sim": r["seq_context_sim"],
+                    "avg_entity_length": r["avg_entity_length"],
+                    "entity_stability": compute_entity_stability(base_entities, r["entities"]),
+                    "entities": r["entities"]
+                })
+    return refinements
+
+def process_row(row):
     text = row["text"]
-    meta = row["meta"]
-    lang = meta["lang"]
+    lang = row["meta"]["lang"]
     row_results = []
 
     for name, (model_lang, model_id, framework) in models.items():
-        if framework == "spacy":
+        if framework != "transformers":
             continue
 
-        # Phase 1 : modèle principal
-        start = time()
-        entities = run_transformers(model_id, text) if framework == "transformers" else run_spacy(model_id, text)
-        duration = time() - start
-        tfidf = compute_tfidf(entities)
-        seq = compute_seqscore_contextual(text, entities)
+        result = process_model(model_id, framework, text)
+        entities = result["entities"]
 
         row_results.append({
             "text": text,
             "text_lang": lang,
             "model": name,
             "phase": "base",
-            "duration": duration,
+            "duration": result["duration"],
             "entity_count": len(entities),
-            "tfidf_score": tfidf,
-            "seq_avg_len": seq["avg_len"],
-            "seq_uniq_ratio": seq["uniq_ratio"],
-            "seq_context_sim": seq["context_sim"],
-            "avg_entity_length": compute_avg_entity_length(entities),
-            "entity_stability": compute_entity_stability(entities, entities),
+            "tfidf_score": result["tfidf_score"],
+            "seq_avg_len": result["seq_avg_len"],
+            "seq_uniq_ratio": result["seq_uniq_ratio"],
+            "seq_context_sim": result["seq_context_sim"],
+            "avg_entity_length": result["avg_entity_length"],
+            "entity_stability": 1.0,
             "entities": entities
         })
 
-        # Phase 2 : raffinement avec spaCy
-        for ent in entities:
-            for spacy_name, (s_lang, s_model_id, s_framework) in models.items():
-                if s_framework == "spacy" and s_lang == lang:
-                    start2 = time()
-                    ents2 = run_spacy(s_model_id, ent)
-                    d2 = time() - start2
-                    tfidf2 = compute_tfidf(ents2)
-                    seq2 = compute_seqscore_contextual(ent, ents2)
+        row_results += refine_with_spacy(entities, name, model_lang, lang)
 
-                    row_results.append({
-                        "text": ent,
-                        "text_lang": lang,
-                        "model": f"{name} → {spacy_name}",
-                        "phase": "refinement_with_spacy",
-                        "duration": duration + d2,
-                        "entity_count": len(ents2),
-                        "tfidf_score": tfidf2,
-                        "seq_avg_len": seq2["avg_len"],
-                        "seq_uniq_ratio": seq2["uniq_ratio"],
-                        "seq_context_sim": seq2["context_sim"],
-                        "avg_entity_length": compute_avg_entity_length(ents2),
-                        "entity_stability": compute_entity_stability(entities, ents2),
-                        "entities": ents2
-                    })
     return row_results
 
 max_rows = len(df_chunk) if device == "cuda" else 20
 n_jobs = -1 if device == "cuda" else 1
 
-def benchmark_ner_parallel(df, max_rows=20, n_jobs=-1):
+def benchmark_ner_parallel(df, max_rows=None, n_jobs=1):
     df = df.head(max_rows)
     results_nested = Parallel(n_jobs=n_jobs)(
-        delayed(process_row)(row, models) for _, row in tqdm(df.iterrows(), total=len(df), desc="Parallel Benchmarking")
+        delayed(process_row)(row) for _, row in tqdm(df.iterrows(), total=len(df), desc="Parallel Benchmarking")
     )
-    flat_results = [item for sublist in results_nested for item in sublist]
-    return pd.DataFrame(flat_results)
+    return pd.DataFrame([item for sublist in results_nested for item in sublist])
 
 print("[INFO] Lancement du benchmark NER...")
 
