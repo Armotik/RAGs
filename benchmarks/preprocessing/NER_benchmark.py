@@ -276,7 +276,7 @@ print("[INFO] Extraction des dates terminée.")
 chunks = np.array_split(df_chunk, 2)
 
 models = {
-    "spacy-fr-core-news-md": ["fr", "fr_core_news_sm", "spacy"],
+    "spacy-fr-core-news-sm": ["fr", "fr_core_news_sm", "spacy"],
     "spacy-fr_dep_news_trf": ["fr", "fr_dep_news_trf", "spacy"],
     "spacy-en-core-web-sm": ["en", "en_core_web_sm", "spacy"],
     "spacy-en_core_web_trf": ["en", "en_core_web_trf", "spacy"],
@@ -294,14 +294,14 @@ def load_spacy_model(model_name):
     return spacy.load(model_name)
 
 transformers_pipelines = {
-    model_name: pipeline(
+    name: pipeline(
         "ner",
         model=AutoModelForTokenClassification.from_pretrained(model_id).to(device).half(),
         tokenizer=AutoTokenizer.from_pretrained(model_id),
-        device=0,  # Index GPU
-        grouped_entities=True
+        device=0,
+        aggregation_strategy="simple"
     )
-    for model_name, (_, model_id, fw) in models.items()
+    for name, (_, model_id, fw) in models.items()
     if fw == "transformers"
 }
 
@@ -361,9 +361,9 @@ def run_transformers(model_name, text):
 def process_model(model_id, framework, text, model_name):
     start = time()
     if framework == "transformers":
-        entities = run_transformers(model_id, text)
+        entities = run_transformers(model_name, text)
     else:
-        entities = run_spacy(model_id, text)
+        entities = run_spacy(model_name, text)
     duration = time() - start
 
     tfidf = compute_tfidf(entities)
