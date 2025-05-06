@@ -276,13 +276,10 @@ print("[INFO] Extraction des dates terminée.")
 chunks = np.array_split(df_chunk, 2)
 
 models = {
-    "spacy-fr-core-news-sm": ["fr", "fr_core_news_sm", "spacy"],
-    "spacy-fr_dep_news_trf": ["fr", "fr_dep_news_trf", "spacy"],
-    "spacy-en-core-web-sm": ["en", "en_core_web_sm", "spacy"],
-    "spacy-en_core_web_trf": ["en", "en_core_web_trf", "spacy"],
     "spacy-xx_ent_wiki_sm": ["multilingual", "xx_ent_wiki_sm", "spacy-first"],
     "wikineural-multilingual-ner": ["multilingual", "Babelscape/wikineural-multilingual-ner", "transformers"],
     "bert-base-multilingual-cased": ["multilingual", "google-bert/bert-base-multilingual-cased", "transformers"],
+    "bert-base-historic-multilingual-cased": ["multilingual", "dbmdz/bert-base-historic-multilingual-cased", "transformers"]
 }
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -299,7 +296,8 @@ transformers_pipelines = {
         model=AutoModelForTokenClassification.from_pretrained(model_id).to(device).half(),
         tokenizer=AutoTokenizer.from_pretrained(model_id),
         device=0,
-        aggregation_strategy="simple"
+        aggregation_strategy="simple",
+        batch_size=128
     )
     for name, (_, model_id, fw) in models.items()
     if fw == "transformers"
@@ -379,71 +377,6 @@ def process_model(model_id, framework, text, model_name):
         "avg_entity_length": compute_avg_entity_length(entities)
     }
 
-def refine_with_spacy(base_entities, base_model_name, text_lang):
-    refinements = []
-    base_entity_set = set(ent[0] if isinstance(ent, tuple) else ent for ent in base_entities)
-
-    for spa_name, (spa_lang, spa_model_id, spa_framework) in models.items():
-        if spa_framework != "spacy" or spa_lang != text_lang:
-            continue
-
-        nlp = load_spacy_model(spa_model_id)
-        all_refined_entities = []
-
-        for ent in base_entities:
-            ent_text = ent[0] if isinstance(ent, tuple) else ent
-            refined_entities = [(e.text, e.label_) for e in nlp(ent_text).ents]
-
-            if ent_text in (e[0] for e in refined_entities):
-                continue  # même entité
-
-            if not refined_entities:
-                refinements.append({
-                    "text": ent_text, "text_lang": text_lang,
-                    "model": f"{base_model_name} → {spa_name}",
-                    "phase": "refinement_with_spacy", "duration": 0.0,
-                    "entity_count": 0, "tfidf_score": 0.0,
-                    "seq_avg_len": 0.0, "seq_uniq_ratio": 0.0, "seq_context_sim": 0.0,
-                    "avg_entity_length": 0.0, "entity_stability": 0.0,
-                    "entities": [], "source": "removed"
-                })
-                continue
-
-            seq2 = compute_seqscore_contextual(ent_text, refined_entities)
-            refinements.append({
-                "text": ent_text, "text_lang": text_lang,
-                "model": f"{base_model_name} → {spa_name}",
-                "phase": "refinement_with_spacy", "duration": 0.0,
-                "entity_count": len(refined_entities),
-                "tfidf_score": compute_tfidf(refined_entities),
-                "seq_avg_len": seq2["avg_len"], "seq_uniq_ratio": seq2["uniq_ratio"],
-                "seq_context_sim": seq2["context_sim"],
-                "avg_entity_length": compute_avg_entity_length(refined_entities),
-                "entity_stability": compute_entity_stability([ent_text], refined_entities),
-                "entities": refined_entities, "source": "modified"
-            })
-            all_refined_entities.extend(refined_entities)
-
-        # Détection globale dans le texte
-        joined = " ".join(ent[0] if isinstance(ent, tuple) else ent for ent in base_entities)
-        global_refined = [(e.text, e.label_) for e in nlp(joined).ents]
-
-        for new_ent in global_refined:
-            if new_ent[0] not in base_entity_set and new_ent not in all_refined_entities:
-                refinements.append({
-                    "text": new_ent[0], "text_lang": text_lang,
-                    "model": f"{base_model_name} → {spa_name}",
-                    "phase": "refinement_with_spacy", "duration": 0.0,
-                    "entity_count": 1,
-                    "tfidf_score": compute_tfidf([new_ent]),
-                    "seq_avg_len": 1.0, "seq_uniq_ratio": 1.0,
-                    "seq_context_sim": 0.0,
-                    "avg_entity_length": len(new_ent[0]),
-                    "entity_stability": 0.0, "entities": [new_ent], "source": "added"
-                })
-
-    return refinements
-
 def process_row(row):
     text = row["text"]
     lang = row["meta"]["lang"]
@@ -458,7 +391,6 @@ def process_row(row):
             "text": text,
             "text_lang": lang,
             "model": name,
-            "phase": "base",
             "duration": result["duration"],
             "entity_count": len(result["entities"]),
             "tfidf_score": result["tfidf_score"],
