@@ -377,39 +377,86 @@ def process_model(model_id, framework, text):
 def refine_with_spacy(base_entities, base_model_name, base_lang, text_lang):
     refinements = []
 
-    for ent in base_entities:
-        for spa_name, (spa_lang, spa_model_id, spa_framework) in models.items():
-            if spa_framework == "spacy" and spa_lang == text_lang:
-                refined_entities = run_spacy(spa_model_id, ent)
+    for spa_name, (spa_lang, spa_model_id, spa_framework) in models.items():
+        if spa_framework != "spacy" or spa_lang != text_lang:
+            continue
 
-                if ent in refined_entities:
-                    # Même entité reconnue → ne rien ajouter
-                    continue
-                elif not refined_entities:
-                    # Non reconnue → suppression (optionnel : logguer)
-                    continue
-                else:
-                    # Remplacée → on ajoute la nouvelle entité
-                    tfidf2 = compute_tfidf(refined_entities)
-                    seq2 = compute_seqscore_contextual(ent, refined_entities)
+        all_refined_entities = []
+        base_entity_set = set(base_entities)
 
-                    refinements.append({
-                        "text": ent,
-                        "text_lang": text_lang,
-                        "model": f"{base_model_name} → {spa_name}",
-                        "phase": "refinement_with_spacy",
-                        "duration": 0.0,
-                        "entity_count": len(refined_entities),
-                        "tfidf_score": tfidf2,
-                        "seq_avg_len": seq2["avg_len"],
-                        "seq_uniq_ratio": seq2["uniq_ratio"],
-                        "seq_context_sim": seq2["context_sim"],
-                        "avg_entity_length": compute_avg_entity_length(refined_entities),
-                        "entity_stability": compute_entity_stability([ent], refined_entities),
-                        "entities": refined_entities
-                    })
+        for ent in base_entities:
+            refined_entities = run_spacy(spa_model_id, ent)
+
+            # cas 1 : même entité détectée → on ignore
+            if ent in refined_entities:
+                continue
+
+            # cas 2 : aucune entité détectée → supprimée
+            if not refined_entities:
+                refinements.append({
+                    "text": ent,
+                    "text_lang": text_lang,
+                    "model": f"{base_model_name} → {spa_name}",
+                    "phase": "refinement_with_spacy",
+                    "duration": 0.0,
+                    "entity_count": 0,
+                    "tfidf_score": 0.0,
+                    "seq_avg_len": 0.0,
+                    "seq_uniq_ratio": 0.0,
+                    "seq_context_sim": 0.0,
+                    "avg_entity_length": 0.0,
+                    "entity_stability": 0.0,
+                    "entities": [],
+                    "source": "removed"
+                })
+                continue
+
+            # cas 3 : entité remplacée ou détaillée → "modified"
+            tfidf2 = compute_tfidf(refined_entities)
+            seq2 = compute_seqscore_contextual(ent, refined_entities)
+
+            refinements.append({
+                "text": ent,
+                "text_lang": text_lang,
+                "model": f"{base_model_name} → {spa_name}",
+                "phase": "refinement_with_spacy",
+                "duration": 0.0,
+                "entity_count": len(refined_entities),
+                "tfidf_score": tfidf2,
+                "seq_avg_len": seq2["avg_len"],
+                "seq_uniq_ratio": seq2["uniq_ratio"],
+                "seq_context_sim": seq2["context_sim"],
+                "avg_entity_length": compute_avg_entity_length(refined_entities),
+                "entity_stability": compute_entity_stability([ent], refined_entities),
+                "entities": refined_entities,
+                "source": "modified"
+            })
+
+            all_refined_entities.extend(refined_entities)
+
+        # cas 4 : nouvelles entités globales dans tout le texte
+        global_refined = run_spacy(spa_model_id, " ".join(base_entities))
+        for new_ent in global_refined:
+            if new_ent not in base_entity_set and new_ent not in all_refined_entities:
+                refinements.append({
+                    "text": new_ent,
+                    "text_lang": text_lang,
+                    "model": f"{base_model_name} → {spa_name}",
+                    "phase": "refinement_with_spacy",
+                    "duration": 0.0,
+                    "entity_count": 1,
+                    "tfidf_score": compute_tfidf([new_ent]),
+                    "seq_avg_len": 1.0,
+                    "seq_uniq_ratio": 1.0,
+                    "seq_context_sim": 0.0,
+                    "avg_entity_length": len(new_ent),
+                    "entity_stability": 0.0,
+                    "entities": [new_ent],
+                    "source": "added"
+                })
 
     return refinements
+
 
 
 def process_row(row):
@@ -418,7 +465,7 @@ def process_row(row):
     row_results = []
 
     for name, (model_lang, model_id, framework) in models.items():
-        if framework != "transformers":
+        if framework == "spacy":
             continue
 
         result = process_model(model_id, framework, text)
