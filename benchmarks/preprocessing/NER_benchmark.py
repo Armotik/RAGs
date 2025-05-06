@@ -278,7 +278,7 @@ chunks = np.array_split(df_chunk, 2)
 models = {
     "spacy-fr-core-news-md": ["fr", "fr_core_news_sm", "spacy"],
     "spacy-fr_dep_news_trf": ["fr", "fr_dep_news_trf", "spacy"],
-    "spacy-en-core-web-sm": ["en", "en_core_web_md", "spacy"],
+    "spacy-en-core-web-sm": ["en", "en_core_web_sm", "spacy"],
     "spacy-en_core_web_trf": ["en", "en_core_web_trf", "spacy"],
     "spacy-xx_ent_wiki_sm": ["multilingual", "xx_ent_wiki_sm", "spacy-first"],
     "spacy-xx_sent_ud_sm": ["multilingual", "xx_sent_ud_sm", "spacy-first"],
