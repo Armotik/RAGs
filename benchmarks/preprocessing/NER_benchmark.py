@@ -334,75 +334,80 @@ def run_spacy(model_name, text):
     entities = [ent.text for ent in doc.ents]
     return entities
 
-def benchmark_ner(df, max_rows=20):
-    results = []
-    df = df.head(max_rows)
+def process_row(row, models):
+    text = row["text"]
+    meta = row["meta"]
+    lang = meta["lang"]
+    row_results = []
 
-    for idx, row in tqdm(df.iterrows(), total=len(df), desc="Benchmarking"):
-        text = row["text"]
-        meta = row["meta"]
-        lang = meta["lang"]
+    for name, (model_lang, model_id, framework) in models.items():
+        if framework == "spacy":
+            continue
 
-        for name, (model_lang, model_id, framework) in models.items():
-            if framework == "spacy":
-                continue  # spaCy uniquement utilisé en phase 2
+        # Phase 1 : modèle principal
+        start = time()
+        entities = run_transformers(model_id, text) if framework == "transformers" else run_spacy(model_id, text)
+        duration = time() - start
+        tfidf = compute_tfidf(entities)
+        seq = compute_seqscore_contextual(text, entities)
 
-            # === Phase 1 : Modèle principal ===
-            start = time()
-            entities = run_transformers(model_id, text) if framework == "transformers" else run_spacy(model_id, text)
-            duration = time() - start
-            tfidf = compute_tfidf(entities)
-            seq = compute_seq_score(entities)
+        row_results.append({
+            "text": text,
+            "text_lang": lang,
+            "model": name,
+            "phase": "base",
+            "duration": duration,
+            "entity_count": len(entities),
+            "tfidf_score": tfidf,
+            "seq_avg_len": seq["avg_len"],
+            "seq_uniq_ratio": seq["uniq_ratio"],
+            "seq_context_sim": seq["context_sim"],
+            "avg_entity_length": compute_avg_entity_length(entities),
+            "entity_stability": compute_entity_stability(entities, entities),
+            "entities": entities
+        })
 
-            results.append({
-                "text": text,
-                "text_lang": lang,
-                "model": name,
-                "phase": "base",
-                "duration": duration,
-                "entity_count": len(entities),
-                "tfidf_score": tfidf,
-                "seqscore": seq,
-                "avg_entity_length": compute_avg_entity_length(entities),
-                "entity_stability": compute_entity_stability(entities, entities),
-                "entities": entities
-            })
+        # Phase 2 : raffinement avec spaCy
+        for ent in entities:
+            for spacy_name, (s_lang, s_model_id, s_framework) in models.items():
+                if s_framework == "spacy" and s_lang == lang:
+                    start2 = time()
+                    ents2 = run_spacy(s_model_id, ent)
+                    d2 = time() - start2
+                    tfidf2 = compute_tfidf(ents2)
+                    seq2 = compute_seqscore_contextual(ent, ents2)
 
-            # === Phase 2 : Second passage avec spaCy
-            for ent in entities:
-
-                for spacy_name, (s_lang, s_model_id, s_framework) in models.items():
-                    if s_framework == "spacy" and s_lang == lang:
-
-                        start2 = time()
-
-                        ents2 = run_spacy(s_model_id, ent)
-
-                        d2 = time() - start2
-                        d2 = duration + d2
-
-                        tfidf2 = compute_tfidf(ents2)
-                        seq2 = compute_seq_score(ents2)
-                        results.append({
-                            "text": ent,
-                            "text_lang": lang,
-                            "model": f"{name} → {spacy_name}",
-                            "phase": "refinement_with_spacy",
-                            "duration": d2,
-                            "entity_count": len(ents2),
-                            "tfidf_score": tfidf2,
-                            "seqscore": seq2,
-                            "avg_entity_length": compute_avg_entity_length(ents2),
-                            "entity_stability": compute_entity_stability(entities, ents2),
-                            "entities": ents2
-                        })
-    return pd.DataFrame(results)
+                    row_results.append({
+                        "text": ent,
+                        "text_lang": lang,
+                        "model": f"{name} → {spacy_name}",
+                        "phase": "refinement_with_spacy",
+                        "duration": duration + d2,
+                        "entity_count": len(ents2),
+                        "tfidf_score": tfidf2,
+                        "seq_avg_len": seq2["avg_len"],
+                        "seq_uniq_ratio": seq2["uniq_ratio"],
+                        "seq_context_sim": seq2["context_sim"],
+                        "avg_entity_length": compute_avg_entity_length(ents2),
+                        "entity_stability": compute_entity_stability(entities, ents2),
+                        "entities": ents2
+                    })
+    return row_results
 
 max_rows = len(df_chunk) if device == "cuda" else 20
+n_jobs = -1 if device == "cuda" else 1
+
+def benchmark_ner_parallel(df, max_rows=20, n_jobs=-1):
+    df = df.head(max_rows)
+    results_nested = Parallel(n_jobs=n_jobs)(
+        delayed(process_row)(row, models) for _, row in tqdm(df.iterrows(), total=len(df), desc="Parallel Benchmarking")
+    )
+    flat_results = [item for sublist in results_nested for item in sublist]
+    return pd.DataFrame(flat_results)
 
 print("[INFO] Lancement du benchmark NER...")
 
-results_df = benchmark_ner(df_chunk, max_rows=10)
+results_df = benchmark_ner_parallel(df_chunk, max_rows=max_rows, n_jobs=n_jobs)
 results_df.to_csv("./NER_benchmark_results.csv", index=False)
 
 print("[INFO] Benchmark terminé.")

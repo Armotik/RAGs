@@ -1,6 +1,7 @@
 import pandas as pd
 import spacy
 from transformers import AutoTokenizer, AutoModelForTokenClassification, pipeline
+import ast
 
 _nlp_models = {}
 
@@ -44,7 +45,7 @@ def post_treatment_bert_entities(entities: list[tuple[str, str]]) -> list[tuple[
 
 def enrich_df_with_ner_pipe(df_chunk: pd.DataFrame) -> pd.DataFrame:
     """
-    Enrich the DataFrame with Named Entity Recognition (NER) using BERT and spaCy.
+    Enrich the DataFrame with Named Entity Recognition (NER) using BERT and spaCy, storing results into meta["entities"].
     :param df_chunk: the DataFrame to enrich
     :return: the enriched DataFrame
     """
@@ -52,10 +53,11 @@ def enrich_df_with_ner_pipe(df_chunk: pd.DataFrame) -> pd.DataFrame:
     model = AutoModelForTokenClassification.from_pretrained("dslim/bert-large-NER")
     bert_ner = pipeline("ner", model=model, tokenizer=tokenizer, aggregation_strategy="simple")
 
-    entities_all = []
+    # S'assurer que "meta" est un dict
+    if isinstance(df_chunk.iloc[0]["meta"], str):
+        df_chunk["meta"] = df_chunk["meta"].apply(lambda x: ast.literal_eval(x))
 
     for index, row in df_chunk.iterrows():
-
         text = row["text"]
         lang = row["meta"]["lang"]
 
@@ -65,7 +67,7 @@ def enrich_df_with_ner_pipe(df_chunk: pd.DataFrame) -> pd.DataFrame:
 
         final_ents = []
         for ent_text, ent_label in ents:
-            if ent_label == "None" or ent_label == "DATE": # skip None labels and DATE (Date Extraction is handled separately)
+            if ent_label is None or ent_label == "None" or ent_label == "DATE":
                 continue
             if ent_label == "MISC":
                 spacy_nlp = get_nlp(lang)
@@ -76,9 +78,9 @@ def enrich_df_with_ner_pipe(df_chunk: pd.DataFrame) -> pd.DataFrame:
             else:
                 final_ents.append((ent_text, ent_label))
 
-        entities_all.append(final_ents)
+        meta = df_chunk.at[index, "meta"]
+        meta["entities"] = final_ents
+        df_chunk.at[index, "meta"] = meta
 
-    df_chunk = df_chunk.copy()
-    df_chunk["entities"] = entities_all
     return df_chunk
 

@@ -2,6 +2,7 @@ import numpy as np
 from joblib import Parallel, delayed
 import pandas as pd
 from tqdm import tqdm
+import torch
 
 from .chunking import chunking
 from .content_extraction import load_lang
@@ -42,10 +43,18 @@ def preprocess_data(languages: list[str], max_docs_per_lang: int, nb_chunk:int) 
 
     print("Enriching metadata (NER) ...")
 
-    results = Parallel(n_jobs=8, backend="loky", prefer="processes")(
-        delayed(enrich_df_with_ner_pipe)(chunk) for chunk in tqdm(chunks)
-    )
+    if not torch.cuda.is_available():
+        print("Using GPU for NER enrichment.")
+        results = Parallel(n_jobs=8, backend="loky", prefer="processes")(
+            delayed(enrich_df_with_ner_pipe)(chunk) for chunk in tqdm(chunks)
+        )
 
-    df_chunk = pd.concat(results, ignore_index=True)
+        df_chunk = pd.concat(results, ignore_index=True)
+    else:
+        print("Using CPU for NER enrichment.")
+        results = enrich_df_with_ner_pipe(df_chunk)
+
+        df_chunk = results
+
 
     return df_chunk
