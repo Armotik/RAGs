@@ -37,7 +37,7 @@ def load_lang(lang: str, max_docs: int) -> list:
     return docs
 
 languages = ['fr', 'en']
-max_docs_per_lang = 10  # taille du dataset (x2 car français + anglais)
+max_docs_per_lang = 20  # taille du dataset (x2 car français + anglais)
 
 results = Parallel(n_jobs=len(languages))(
     delayed(load_lang)(lang, max_docs_per_lang) for lang in languages
@@ -358,12 +358,12 @@ def run_transformers(model_name, text):
     return [(ent["word"], ent["entity_group"]) for ent in pipe(text)]
 
 
-def process_model(model_id, framework, text):
+def process_model(model_id, framework, text, model_name):
     start = time()
     if framework == "transformers":
-        entities = run_transformers(model_id, text)
+        entities = run_transformers(model_name, text)
     else:
-        entities = run_spacy(model_id, text)
+        entities = run_spacy(model_name, text)
     duration = time() - start
 
     tfidf = compute_tfidf(entities)
@@ -452,7 +452,7 @@ def process_row(row):
     for name, (model_lang, model_id, framework) in models.items():
         if model_lang != lang and model_lang != "multilingual":
             continue
-        result = process_model(model_id, framework, text)
+        result = process_model(model_id, framework, text, model_name)
         row_results.append({
             "docid": docid,
             "text": text,
