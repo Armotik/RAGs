@@ -281,7 +281,6 @@ models = {
     "spacy-en-core-web-sm": ["en", "en_core_web_sm", "spacy"],
     "spacy-en_core_web_trf": ["en", "en_core_web_trf", "spacy"],
     "spacy-xx_ent_wiki_sm": ["multilingual", "xx_ent_wiki_sm", "spacy-first"],
-    "spacy-xx_sent_ud_sm": ["multilingual", "xx_sent_ud_sm", "spacy-first"],
     "wikineural-multilingual-ner": ["multilingual", "Babelscape/wikineural-multilingual-ner", "transformers"],
     "bert-base-multilingual-cased": ["multilingual", "google-bert/bert-base-multilingual-cased", "transformers"],
 }
@@ -294,11 +293,17 @@ print("[INFO] Device utilisé :", device)
 def load_spacy_model(model_name):
     return spacy.load(model_name)
 
-@lru_cache(maxsize=None)
-def load_transformers_pipeline(model_name):
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
-    model = AutoModelForTokenClassification.from_pretrained(model_name)
-    return pipeline("ner", model=model, tokenizer=tokenizer, grouped_entities=True)
+transformers_pipelines = {
+    model_name: pipeline(
+        "ner",
+        model=AutoModelForTokenClassification.from_pretrained(model_id).to(device).half(),
+        tokenizer=AutoTokenizer.from_pretrained(model_id),
+        device=0,  # Index GPU
+        grouped_entities=True
+    )
+    for model_name, (_, model_id, fw) in models.items()
+    if fw == "transformers"
+}
 
 def compute_tfidf(entities):
     tokens = [e[0] for e in entities]  # extraire les textes
@@ -349,7 +354,7 @@ def run_spacy(model_name, text):
     return [ent.text for ent in nlp(text).ents]
 
 def run_transformers(model_name, text):
-    pipe = load_transformers_pipeline(model_name)
+    pipe = transformers_pipelines[model_name]
     return [(ent["word"], ent["entity_group"]) for ent in pipe(text)]
 
 
@@ -463,33 +468,28 @@ def refine_with_spacy(base_entities, base_model_name, base_lang, text_lang):
 def process_row(row):
     text = row["text"]
     lang = row["meta"]["lang"]
+    docid = row["meta"]["docid"]
     row_results = []
-
     for name, (model_lang, model_id, framework) in models.items():
-        if framework == "spacy":
+        if model_lang != lang and model_lang != "multilingual":
             continue
-
         result = process_model(model_id, framework, text)
-        entities = result["entities"]
-
         row_results.append({
-            "docid": row["meta"]["docid"],
+            "docid": docid,
             "text": text,
             "text_lang": lang,
             "model": name,
             "phase": "base",
             "duration": result["duration"],
-            "entity_count": len(entities),
+            "entity_count": len(result["entities"]),
             "tfidf_score": result["tfidf_score"],
             "seq_avg_len": result["seq_avg_len"],
             "seq_uniq_ratio": result["seq_uniq_ratio"],
             "seq_context_sim": result["seq_context_sim"],
             "avg_entity_length": result["avg_entity_length"],
             "entity_stability": 1.0,
-            "entities": entities
+            "entities": result["entities"]
         })
-
-        row_results += refine_with_spacy(entities, name, model_lang, lang)
 
     return row_results
 
