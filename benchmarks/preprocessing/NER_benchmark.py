@@ -344,7 +344,9 @@ def compute_entity_stability(entities_base, entities_secondary):
 
 def run_spacy(model_name, text):
     nlp = load_spacy_model(model_name)
-    return [(ent.text, ent.label_) for ent in nlp(text).ents]
+    if nlp is None or not isinstance(text, str):
+        return []
+    return [ent.text for ent in nlp(text).ents]
 
 def run_transformers(model_name, text):
     pipe = load_transformers_pipeline(model_name)
