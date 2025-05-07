@@ -16,6 +16,7 @@ from transformers import pipeline, AutoModelForTokenClassification, AutoTokenize
 import torch
 import faiss
 from sentence_transformers import SentenceTransformer
+import json
 
 torch.cuda.empty_cache()
 
@@ -48,7 +49,7 @@ else :
 
 
     languages = ['fr', 'en']
-    max_docs_per_lang = 100  # taille du dataset (x2 car français + anglais)
+    max_docs_per_lang = 10000  # taille du dataset (x2 car français + anglais)
 
     results = Parallel(n_jobs=len(languages))(
         delayed(load_lang)(lang, max_docs_per_lang) for lang in languages
@@ -290,7 +291,7 @@ else :
 
     print("[INFO] Extraction des dates terminée.")
 
-    chunks = np.array_split(df_chunk, 2)
+    chunks = np.array_split(df_chunk, 512)
 
     def post_treatment_bert_entities(entities: list[tuple[str, str]]) -> list[tuple[str, str]]:
         """
@@ -413,11 +414,11 @@ def save_final_results(model_name, doc_embeddings, index, results_dict):
     df_result.to_csv(f"{save_dir}/summary.csv", index=False)
 
     with open(f"{save_dir}/summary.json", "w") as f:
-        import json
-        json.dump(results_dict, f, indent=4)
+        clean_dict = {k: (float(v) if isinstance(v, (np.float32, np.float64)) else v) for k, v in results_dict.items()}
+        json.dump(clean_dict, f, indent=4)
 
 
-def encode_on_gpu(texts, model_path, device, batch_size=512):
+def encode_on_gpu(texts, model_path, device, batch_size=128):
     torch.cuda.set_device(device)
     model = SentenceTransformer(model_path, device=device)
     return model.encode(texts, batch_size=batch_size, convert_to_numpy=True, normalize_embeddings=True)
@@ -502,7 +503,10 @@ final_results = []
 
 for model_name, model_path in models.items():
     print(f"[INFO] Evaluation du modèle {model_name}...")
+    torch.cuda.empty_cache()
     results = evaluate_model_massive_multigpu(model_name, model_path, df_chunk["text"].tolist(),
                                               df_chunk["meta"].tolist())
     final_results.append(results)
     print(f"[INFO] Évaluation du modèle {model_name} terminée.")
+
+print("[INFO] Évaluation de tous les modèles terminée.")
