@@ -49,7 +49,7 @@ else :
 
 
     languages = ['fr', 'en']
-    max_docs_per_lang = 10000  # taille du dataset (x2 car français + anglais)
+    max_docs_per_lang = 100000  # taille du dataset (x2 car français + anglais)
 
     results = Parallel(n_jobs=len(languages))(
         delayed(load_lang)(lang, max_docs_per_lang) for lang in languages
@@ -291,7 +291,7 @@ else :
 
     print("[INFO] Extraction des dates terminée.")
 
-    chunks = np.array_split(df_chunk, 512)
+    chunks = np.array_split(df_chunk, 5000)
 
     def post_treatment_bert_entities(entities: list[tuple[str, str]]) -> list[tuple[str, str]]:
         """
