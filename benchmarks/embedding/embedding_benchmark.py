@@ -446,7 +446,7 @@ def evaluate_model_massive_multigpu(model_name, model_path, corpus, meta, k=5):
 
     dim = doc_embeddings.shape[1]
     res = faiss.StandardGpuResources()
-    index = faiss.IndexFlatL2(dim)
+    index = faiss.IndexFlatIP(dim)
     index.add(doc_embeddings)
 
     # Recherche par similarité en batch
