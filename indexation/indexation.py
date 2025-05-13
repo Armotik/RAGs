@@ -3,6 +3,8 @@ import pandas as pd
 from pymilvus import MilvusClient
 from tqdm import tqdm
 
+from preprocessing import preprocess_data
+from embedding import vectorisation
 
 def indexation(df:pd.DataFrame, embeddings:np.ndarray, client:MilvusClient, collection_name:str) -> None:
     """
@@ -14,25 +16,76 @@ def indexation(df:pd.DataFrame, embeddings:np.ndarray, client:MilvusClient, coll
     :return: None
     """
 
+    if len(df) != len(embeddings):
+        raise ValueError(f"Mismatch: len(df) = {len(df)}, len(embeddings) = {len(embeddings)}")
+
+    df = df.reset_index(drop=True)
+
     data = []
 
+    print("Indexing data...")
+
     for i, row in df.iterrows():
+
+        meta = row["meta"]
+        docid = meta.get("docid")
+
+        existing_docs = client.query(
+            collection_name=collection_name,
+            filter=f'docid == "{docid}"',
+            output_fields=["docid"]
+        )
+
+        if existing_docs:
+            continue
+
         entry = {
             "id": i,
             "vector": embeddings[i],
             "text": row["text"],
-            "title": row["meta"]["title"],
-            "lang": row["meta"]["lang"],
-            "dates_iso": row["meta"]["dates_iso"],
-            "earliest_date": row["meta"]["earliest_date"],
-            "latest_date": row["meta"]["latest_date"],
-            "entities": [ent["text"] for ent in row["meta"].get("entities", [])],
+            "docid": meta.get("docid"),
+            "title": meta.get("title"),
+            "lang": meta.get("lang"),
+            "dates": meta.get("dates", []),
+            "entities": meta.get("entities", [])
         }
 
         data.append(entry)
 
-    batch_size = 1000
+    batch_size = 5000
 
     for i in tqdm(range(0, len(data), batch_size), desc="Insertion dans Milvus"):
         batch = data[i:i + batch_size]
         client.insert(collection_name=collection_name, data=batch)
+
+    print("Indexation terminée. -> ", len(data), "documents indexés.")
+
+
+def add_new_documents(documents, client, collection_name, model_name, framework, batch_size):
+    """
+    Ajoute de nouveaux documents à la base de données.
+    :param documents: Liste de nouveaux documents à ajouter.
+    :param client: Client Milvus.
+    :param collection_name: Nom de la collection.
+    :param model_name: Modèle d'embedding.
+    :param framework: Framework utilisé pour l'embedding.
+    :param batch_size: Taille des lots pour l'embedding.
+    """
+    # Prétraitement
+    processed_data = preprocess_data(documents)
+
+    # Génération des embeddings
+    embeddings = vectorisation(
+        processed_data,
+        model_name,
+        framework,
+        batch_size
+    )
+
+    # Indexation
+    indexation(
+        df=processed_data,
+        embeddings=embeddings,
+        client=client,
+        collection_name=collection_name
+    )

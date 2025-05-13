@@ -9,15 +9,15 @@ from indexation import database_creation, indexation, test_search
 ###
 
 languages = ['fr', 'en']
-max_docs_per_lang = 100 # taille du dataset (x2 car français + anglais)
+max_docs_per_lang = 2000000 # taille du dataset (x2 car français + anglais)
 
-res = preprocess_data(languages, max_docs_per_lang, 64)
+res = preprocess_data(languages, max_docs_per_lang, 400)
 
 embeddings = vectorisation(
     res,
-    "intfloat/e5-small-v2",
-    'onnx',
-    16
+    "intfloat/multilingual-e5-large-instruct",
+    'torch',
+    128
 )
 
 index_params = MilvusClient.prepare_index_params()
@@ -35,7 +35,7 @@ index_params.add_index(
 
 client = database_creation.create_database(
     name="test",
-    drop_collection=True,
+    drop_collection=False,
     dim=embeddings.shape[1],
     index_param=index_params,
 )
@@ -44,27 +44,21 @@ indexation(
     df=res,
     embeddings=embeddings,
     client=client,
-    collection_name="test",
+    collection_name="v1",
 )
 
 query = "Qui est Antoin Meillet ?"
 
 query_vector = query_vectorisation(
     query,
-    "intfloat/e5-small-v2",
-    'onnx',
+    "intfloat/multilingual-e5-large-instruct",
+    'torch',
     16
 )
 
 results = test_search(
     client=client,
     query_vector=query_vector,
-    collection_name="test",
+    collection_name="v1",
     top_k=1
 )
-
-# data: ["[{'id': 1, 'distance': 0.8859543204307556, 'entity': {'text': 'Il est aussi philologue.', 'title': 'Antoine Meillet', 'lang': 'fr'}}]"]
-# data: ["[{'id': 1, 'distance': 0.8859543204307556, 'entity': {}}]"]
-
-
-print(results)

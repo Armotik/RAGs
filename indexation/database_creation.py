@@ -28,6 +28,20 @@ def create_database(name:str, drop_collection:bool, dim:int, index_param:IndexPa
         index_params=index_param,
     )
 
+    client.create_schema(
+        collection_name=name,
+        fields=[
+            {"name": "id", "type": "int64", "is_primary": True, "auto_id": False},
+            {"name": "vector", "type": "float_vector", "params": {"dim": dim}},
+            {"name": "text", "type": "string"},
+            {"name": "docid", "type": "string"},
+            {"name": "title", "type": "string"},
+            {"name": "lang", "type": "string"},
+            {"name": "dates", "type": "json"},
+            {"name": "entities", "type": "json"},
+        ],
+    )
+
     print(f"Collection {name} created.")
 
     return client

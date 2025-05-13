@@ -26,3 +26,17 @@ def test_search(query_vector, client:MilvusClient, collection_name:str, top_k:in
     )
 
     return results
+
+def delete_by_doc_id(client, collection_name, doc_id):
+    """
+    Supprime un document de la collection en fonction de son doc_id.
+    :param client: Client Milvus.
+    :param collection_name: Nom de la collection.
+    :param doc_id: Identifiant du document à supprimer.
+    """
+    filter_query = f'docid == "{doc_id}"'
+    client.delete(
+        collection_name=collection_name,
+        filter=filter_query
+    )
+    print(f"Document avec doc_id={doc_id} supprimé.")
