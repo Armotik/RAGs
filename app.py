@@ -8,10 +8,12 @@ from indexation import database_creation, indexation, test_search
 ###
 ###
 
-languages = ['fr', 'en']
-max_docs_per_lang = 2000000 # taille du dataset (x2 car français + anglais)
+print("[INFO] - Starting the application...")
 
-res = preprocess_data(languages, max_docs_per_lang, 400)
+languages = ['fr', 'en']
+max_docs_per_lang = 50000 # taille du dataset (x2 car français + anglais)
+
+res = preprocess_data(languages, max_docs_per_lang, 200)
 
 embeddings = vectorisation(
     res,
@@ -34,7 +36,7 @@ index_params.add_index(
 )
 
 client = database_creation.create_database(
-    name="test",
+    name="rag_v1",
     drop_collection=False,
     dim=embeddings.shape[1],
     index_param=index_params,
@@ -44,7 +46,7 @@ indexation(
     df=res,
     embeddings=embeddings,
     client=client,
-    collection_name="v1",
+    collection_name="rag_v1",
 )
 
 query = "Qui est Antoin Meillet ?"
@@ -59,6 +61,6 @@ query_vector = query_vectorisation(
 results = test_search(
     client=client,
     query_vector=query_vector,
-    collection_name="v1",
+    collection_name="rag_v1",
     top_k=1
 )

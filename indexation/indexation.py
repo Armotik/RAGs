@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 from pymilvus import MilvusClient
 from tqdm import tqdm
+import datetime
 
 from preprocessing import preprocess_data
 from embedding import vectorisation
@@ -17,13 +18,18 @@ def indexation(df:pd.DataFrame, embeddings:np.ndarray, client:MilvusClient, coll
     """
 
     if len(df) != len(embeddings):
-        raise ValueError(f"Mismatch: len(df) = {len(df)}, len(embeddings) = {len(embeddings)}")
+        raise ValueError(f"[ERROR - {datetime.datetime.now()}]  Mismatch: len(df) = {len(df)}, len(embeddings) = {len(embeddings)}")
+
+
+    if not client.has_collection(collection_name):
+        raise ValueError(f"[ERROR - {datetime.datetime.now()}]  Collection {collection_name} does not exist in Milvus.")
 
     df = df.reset_index(drop=True)
 
     data = []
 
-    print("Indexing data...")
+    print(f"[INFO - {datetime.datetime.now()}]  Indexing data in Milvus...")
+    time = datetime.datetime.now()
 
     for i, row in df.iterrows():
 
@@ -41,7 +47,7 @@ def indexation(df:pd.DataFrame, embeddings:np.ndarray, client:MilvusClient, coll
 
         entry = {
             "id": i,
-            "vector": embeddings[i],
+            "vector": embeddings[i].tolist(),
             "text": row["text"],
             "docid": meta.get("docid"),
             "title": meta.get("title"),
@@ -58,7 +64,7 @@ def indexation(df:pd.DataFrame, embeddings:np.ndarray, client:MilvusClient, coll
         batch = data[i:i + batch_size]
         client.insert(collection_name=collection_name, data=batch)
 
-    print("Indexation terminée. -> ", len(data), "documents indexés.")
+    print(f"[INFO - {datetime.datetime.now()}] {len(data)} documents indexed in {datetime.datetime.now() - time} seconds.")
 
 
 def add_new_documents(documents, client, collection_name, model_name, framework, batch_size):
@@ -72,7 +78,7 @@ def add_new_documents(documents, client, collection_name, model_name, framework,
     :param batch_size: Taille des lots pour l'embedding.
     """
     # Prétraitement
-    processed_data = preprocess_data(documents)
+    processed_data = preprocess_data(documents) # TODO
 
     # Génération des embeddings
     embeddings = vectorisation(
@@ -87,5 +93,5 @@ def add_new_documents(documents, client, collection_name, model_name, framework,
         df=processed_data,
         embeddings=embeddings,
         client=client,
-        collection_name=collection_name
+        collection_name=collection_name,
     )

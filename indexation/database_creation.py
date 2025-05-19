@@ -15,11 +15,11 @@ def create_database(name:str, drop_collection:bool, dim:int, index_param:IndexPa
     client = MilvusClient(f"{name}_milvus.db")
 
     if drop_collection and client.has_collection(name):
-        print(f"Collection {name} already exists. Dropping it.")
+        print(f"[INFO] Collection {name} already exists. Dropping it.")
         client.drop_collection(name)
 
     elif client.has_collection(name):
-        print(f"Collection {name} already exists.")
+        print(f"[INFO] Collection {name} already exists.")
         return client
 
     client.create_collection(
@@ -30,18 +30,20 @@ def create_database(name:str, drop_collection:bool, dim:int, index_param:IndexPa
 
     client.create_schema(
         collection_name=name,
-        fields=[
-            {"name": "id", "type": "int64", "is_primary": True, "auto_id": False},
-            {"name": "vector", "type": "float_vector", "params": {"dim": dim}},
-            {"name": "text", "type": "string"},
-            {"name": "docid", "type": "string"},
-            {"name": "title", "type": "string"},
-            {"name": "lang", "type": "string"},
-            {"name": "dates", "type": "json"},
-            {"name": "entities", "type": "json"},
-        ],
+        schema={
+            "fields": [
+                {"name": "id", "type": "int64", "is_primary": True, "auto_id": False},
+                {"name": "vector", "type": "float_vector", "params": {"dim": dim}},
+                {"name": "text", "type": "string"},
+                {"name": "docid", "type": "string"},
+                {"name": "title", "type": "string"},
+                {"name": "lang", "type": "string"},
+                {"name": "dates", "type": "json"},
+                {"name": "entities", "type": "json"},
+            ]
+        }
     )
 
-    print(f"Collection {name} created.")
+    print(f"[INFO] Collection {name} created.")
 
     return client

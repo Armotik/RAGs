@@ -5,6 +5,7 @@ from joblib import Parallel, delayed
 import pandas as pd
 from tqdm import tqdm
 import torch
+import datetime
 
 from .chunking import chunking
 from .content_extraction import load_lang
@@ -22,15 +23,20 @@ def preprocess_data(languages: list[str], max_docs_per_lang: int, nb_chunk:int, 
     :return: a pandas DataFrame containing all documents
     """
 
-    if os.path.exists("../checkpoint__df_chunk_ready.json") and not new_docs:
-        print("[INFO] Chargement des données déjà prétraitées...")
-        df_chunk = pd.read_parquet("df_chunk_ready.parquet")
+    t_time = datetime.datetime.now()
+
+    if os.path.exists("data/checkpoint__df_chunk_ready.json") and not new_docs:
+        print("[INFO] Loading documents from checkpoint...")
+        df_chunk = pd.read_parquet("data/df_chunk_ready.parquet")
+
+        print(f"[INFO - {datetime.datetime.now()}] Documents loaded in {datetime.datetime.now() - t_time}")
 
         return df_chunk
 
     else:
 
-        print("Loading documents...")
+        print(f"[INFO - {datetime.datetime.now()}] Loading documents...")
+        time = datetime.datetime.now()
 
         results = Parallel(n_jobs=len(languages))(
             delayed(load_lang)(lang, max_docs_per_lang) for lang in languages
@@ -38,7 +44,7 @@ def preprocess_data(languages: list[str], max_docs_per_lang: int, nb_chunk:int, 
 
         all_docs = [doc for lang_docs in results for doc in lang_docs]
 
-        print("Documents loaded.")
+        print(f"[INFO - {datetime.datetime.now()}] Documents loaded in {datetime.datetime.now() - time}")
 
         df = pd.DataFrame(all_docs)
         df["title"] = df["title"].apply(clean_text)
@@ -46,33 +52,41 @@ def preprocess_data(languages: list[str], max_docs_per_lang: int, nb_chunk:int, 
 
         df_chunk = chunking(df, 0)
 
-        print("Enriching metadata (dates) ...")
+        print(f"[INFO - {datetime.datetime.now()}] Enriching metadata (dates) ...")
+        time = datetime.datetime.now()
 
         df_chunk = extract_date(df_chunk)
 
+        print(f"[INFO - {datetime.datetime.now()}] Metadata enriched in {datetime.datetime.now() - time}")
+
         chunks = np.array_split(df_chunk, nb_chunk)
 
-        print("Enriching metadata (NER) ...")
+        print(f"[INFO - {datetime.datetime.now()}] Enriching metadata (NER) ...")
+        time = datetime.datetime.now()
 
-
-
-        if not torch.cuda.is_available():
-            print("Using GPU for NER enrichment.")
+        if torch.cuda.is_available():
+            print("[INFO] Using GPU for NER enrichment.")
             results = Parallel(n_jobs=8)(
                 delayed(enrich_df_with_ner_pipe)(chunk) for chunk in tqdm(chunks)
             )
 
             df_chunk = pd.concat(results, ignore_index=True)
         else:
-            print("Using CPU for NER enrichment.")
+            print("[INFO] Using CPU for NER enrichment.")
             results = enrich_df_with_ner_pipe(df_chunk)
 
             df_chunk = results
 
+        print(f"[INFO - {datetime.datetime.now()}] Metadata enriched in {datetime.datetime.now() - time}")
+
         df_chunk.dropna(inplace=True)
 
-        df_chunk.to_parquet("../data/df_chunk_ready.parquet")
-        with open("../data/checkpoint__df_chunk_ready.json", "w") as f:
+        save_dir = 'data'
+        os.makedirs(save_dir, exist_ok=True)
+
+        df_chunk.to_parquet(os.path.join(save_dir, "df_chunk_ready.parquet"), index=False)
+        with open("checkpoint__df_chunk_ready.json", "w") as f:
             f.write("done")
 
+        print(f"[INFO - {datetime.datetime.now()}] Documents preprocessed in {datetime.datetime.now() - t_time}")
         return df_chunk

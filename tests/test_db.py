@@ -1,29 +1,10 @@
-from pymilvus import MilvusClient
+from pymilvus import MilvusClient, Collection, Connections
 
-client = MilvusClient("../test_milvus.db")
-collection_name = "test"
+client = MilvusClient("../rag_v1_milvus.db")
+collection_name = "rag_v1"
 
 print(client.describe_collection(collection_name))
 
-offset = 0
-batch_size = 1000
+collection = Collection(collection_name)
 
-while True:
-    results = client.query(
-        collection_name=collection_name,
-        filter=None,
-        output_fields=[
-            "id", "text", "title", "lang", "docid",
-            "dates", "entities"
-        ],
-        limit=batch_size,
-        offset=offset
-    )
-
-    if not results:
-        break
-
-    for r in results:
-        print(r)
-
-    offset += batch_size
+print(collection.num_entities)
