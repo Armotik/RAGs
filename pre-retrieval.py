@@ -1,8 +1,8 @@
 from pymilvus import MilvusClient
 
 from preprocessing import preprocess_data
-from embedding import vectorisation, query_vectorisation
-from indexation import database_creation, indexation, test_search
+from embedding import vectorisation
+from indexation import database_creation, indexation
 
 ###
 ###
@@ -37,7 +37,7 @@ index_params.add_index(
 
 client = database_creation.create_database(
     name="rag_v1",
-    drop_collection=False,
+    drop_collection=True,
     dim=embeddings.shape[1],
     index_param=index_params,
 )
@@ -47,20 +47,4 @@ indexation(
     embeddings=embeddings,
     client=client,
     collection_name="rag_v1",
-)
-
-query = "Qui est Antoin Meillet ?"
-
-query_vector = query_vectorisation(
-    query,
-    "intfloat/multilingual-e5-large-instruct",
-    'torch',
-    16
-)
-
-results = test_search(
-    client=client,
-    query_vector=query_vector,
-    collection_name="rag_v1",
-    top_k=1
 )
