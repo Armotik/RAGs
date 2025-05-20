@@ -36,7 +36,10 @@ def vectorisation(df: pd.DataFrame, model_name: str, backend: Literal["torch", "
 
     print(f"[INFO - {datetime.datetime.now()}] Vectorising data...")
 
-    texts = df["text"].tolist()
+    df["chunk"] = df["meta"].apply(lambda x: "À propos de " + x.get("title", "") + "\n" + df["text"] if x.get(
+        "lang") == "fr" else "About " + x.get("title", "") + "\n" + df["text"])
+
+    texts = df["chunk"].tolist()
 
     embeddings = []
     for i in range(0, len(texts), batch_size):
@@ -59,4 +62,3 @@ def vectorisation(df: pd.DataFrame, model_name: str, backend: Literal["torch", "
     embeddings = np.vstack(embeddings)
     np.save("data/embeddings.npy", embeddings)
     return embeddings
-

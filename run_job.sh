@@ -1,12 +1,12 @@
 #!/bin/bash
-#SBATCH --partition=gpu-2080ti
+#SBATCH --partition=gpu-h100
 #SBATCH --time=48:00:00
 #SBATCH --job-name=rag_post-retrieval
 #SBATCH --output=job-%j.out
 #SBATCH --error=job-%j.err
 #SBATCH --nodes=1
-#SBATCH --ntasks-per-node=16
-#SBATCH --mem=80GB
+#SBATCH --ntasks-per-node=32
+#SBATCH --mem=64G
 #SBATCH --gres=gpu:1
 
 module load Anaconda3
