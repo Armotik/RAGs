@@ -36,6 +36,8 @@ def vectorisation(df: pd.DataFrame, model_name: str, backend: Literal["torch", "
 
     print(f"[INFO - {datetime.datetime.now()}] Vectorising data...")
 
+    df["chunk"] = df["meta"].apply(lambda x: "À propos de " + x.get("title", "") + "\n" + df["text"] if x.get(
+        "lang") == "fr" else "About " + x.get("title", "") + "\n" + df["text"])
     texts = df["text"].tolist()
 
     embeddings = []
@@ -59,4 +61,3 @@ def vectorisation(df: pd.DataFrame, model_name: str, backend: Literal["torch", "
     embeddings = np.vstack(embeddings)
     np.save("data/embeddings.npy", embeddings)
     return embeddings
-
