@@ -1,0 +1,9 @@
+Donner un le texte + entités + titre au LLM pour générer, 1 question et 1 réponse ainsi qu'un score de confiance pour faire du chunking contextuel.
+
+Utiliser un BERT Score pour le score de confiance entre la réponse et le chunk de base
+
+Comparer sur les autres articles du dataset Miracl
+
+Tester sur NewsEyes (texte)
+
+Besoin de plus d'évaluation qualitative sur les réponses générées
