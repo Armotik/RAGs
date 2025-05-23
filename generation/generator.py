@@ -4,8 +4,10 @@ from time import time
 
 def build_structured_context(context_docs: list, max_chars_per_doc_chunk: int = 1000) -> str:
     """
-    Construit une chaîne de contexte structurée à partir des documents récupérés.
-    Regroupe les chunks provenant du même article et utilise les titres.
+    Build a structured context from the provided documents.
+    :param context_docs: The list of context documents to be processed.
+    :param max_chars_per_doc_chunk: The maximum number of characters per document chunk.
+    :return:
     """
     final_context_parts = []
 

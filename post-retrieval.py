@@ -7,7 +7,6 @@ from generation import generate_response
 from sentence_transformers import SentenceTransformer
 from pymilvus import MilvusClient
 import torch
-import os
 from dotenv import load_dotenv
 
 model_name = "intfloat/multilingual-e5-large-instruct"
@@ -15,37 +14,42 @@ collection_name = "rag_v1"
 
 load_dotenv()
 
-HF_TOKEN = os.getenv("HF_TOKEN")
-
-print("[INFO] Loading model...")
+print("[INFO] Loading models...")
 
 model = SentenceTransformer(model_name, trust_remote_code=True)
 client = MilvusClient(f"{collection_name}_milvus.db")
 
-print("[INFO] Model loaded.")
+llm_model_name = "mistralai/Mistral-7B-Instruct-v0.3"
+device = "cuda" if torch.cuda.is_available() else "cpu"
 
-query = "Quelles ont été les conséquences majeures de la Première Guerre mondiale en Europe ?"
+print(f"[INFO] Load LLM : {llm_model_name} on {device}...")
 
-variations = [
+llm_tokenizer = AutoTokenizer.from_pretrained(llm_model_name)
+llm_model = AutoModelForCausalLM.from_pretrained(
+    llm_model_name,
+    torch_dtype=torch.float16,
+    device_map="auto",
+    trust_remote_code=True,
+)
 
-    "Comment la Première Guerre mondiale a-t-elle transformé la société européenne ?",
+if llm_tokenizer.pad_token_id is None:
+    llm_tokenizer.pad_token_id = llm_tokenizer.eos_token_id
 
-    "Quels changements politiques et sociaux l'Europe a-t-elle connus après 1918 ?",
+print("[INFO] LLM loaded.")
 
-    "Impact de la Grande Guerre sur les frontières et les nations en Europe.",
+print("[INFO] Models loaded.")
 
-    "Décrivez les principaux bouleversements économiques en Europe suite à la guerre de 14-18.",
-
-    "Quelles étaient les répercussions à long terme du premier conflit mondial sur le continent européen ?"
-
-]
+query = "Expliquez en détail comment les voyages interstellaires des Romains ont influencé l'architecture des temples égyptiens"
 
 docs = multi_query_fusion(
     query=query,
     collection_name=collection_name,
     client=client,
     encoder=model,
-    variations=variations,
+    llm_variation_model=llm_model,
+    llm_variation_tokenizer=llm_tokenizer,
+    num_variations_to_generate=4,
+    generate_variations_flag=True,
     top_k=20
 )
 
@@ -55,25 +59,6 @@ reranked_docs = rerank_documents(
     model=model,
     top_k=10
 )
-
-llm_model_name = "mistralai/Mistral-7B-Instruct-v0.3"
-device = "cuda" if torch.cuda.is_available() else "cpu"
-
-print(f"[INFO] Chargement du LLM: {llm_model_name} sur {device}...")
-
-llm_tokenizer = AutoTokenizer.from_pretrained(llm_model_name)
-llm_model = AutoModelForCausalLM.from_pretrained(
-    llm_model_name,
-    torch_dtype=torch.float16,
-    device_map="auto",
-    trust_remote_code=True,
-    token=HF_TOKEN,
-)
-
-if llm_tokenizer.pad_token_id is None:
-    llm_tokenizer.pad_token_id = llm_tokenizer.eos_token_id
-
-print("[INFO] LLM chargé.")
 
 final_answer = generate_response(
     query=query,

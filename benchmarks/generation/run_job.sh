@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --partition=gpu-h100
-#SBATCH --time=2:00:00
+#SBATCH --time=12:00:00
 #SBATCH --job-name=rag_evaluation
 #SBATCH --output=job-%j.out
 #SBATCH --error=job-%j.err
@@ -13,4 +13,4 @@ module load Anaconda3
 source /opt/easybuild/software/Anaconda3/2024.02-1/etc/profile.d/conda.sh
 conda activate rag_env
 
-python post-retrieval.py
+python ragas_eval.py
