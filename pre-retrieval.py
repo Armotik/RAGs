@@ -1,4 +1,6 @@
+import torch
 from pymilvus import MilvusClient
+from transformers import AutoTokenizer, AutoModelForCausalLM
 
 from preprocessing import preprocess_data
 from embedding import vectorisation
@@ -11,9 +13,32 @@ from indexation import database_creation, indexation
 print("[INFO] - Starting the application...")
 
 languages = ['fr', 'en']
-max_docs_per_lang = 50000 # taille du dataset (x2 car français + anglais)
+max_docs_per_lang = 100 # taille du dataset (x2 car français + anglais)
 
-res = preprocess_data(languages, max_docs_per_lang, 200)
+llm_model_name_for_qa = "mistralai/Mistral-7B-Instruct-v0.3"
+device = "cuda" if torch.cuda.is_available() else "cpu"
+print(f"[INFO] Loading LLM for Q/A generation: {llm_model_name_for_qa} on {device}...")
+
+llm_tokenizer_qab = AutoTokenizer.from_pretrained(llm_model_name_for_qa)
+llm_model_qab = AutoModelForCausalLM.from_pretrained(
+    llm_model_name_for_qa,
+    torch_dtype=torch.float16,
+    device_map="auto",
+    trust_remote_code=True
+)
+
+if llm_tokenizer_qab.pad_token_id is None:
+    llm_tokenizer_qab.pad_token_id = llm_tokenizer_qab.eos_token_id
+print("[INFO] LLM for Q/A generation loaded.")
+
+res = preprocess_data(
+    languages,
+    max_docs_per_lang,
+    8,
+    llm_model_qab,
+    llm_tokenizer_qab,
+    new_docs=True,
+)
 
 embeddings = vectorisation(
     res,

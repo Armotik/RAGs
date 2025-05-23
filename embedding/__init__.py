@@ -1,1 +1,1 @@
-from .vectorisation import vectorisation, query_vectorisation
+from .vectorisation import vectorisation
