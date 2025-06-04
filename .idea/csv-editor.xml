@@ -24,6 +24,13 @@
             </Attribute>
           </value>
         </entry>
+        <entry key="/tests/test_preprocessing_output_qab.csv">
+          <value>
+            <Attribute>
+              <option name="separator" value="," />
+            </Attribute>
+          </value>
+        </entry>
       </map>
     </option>
   </component>

@@ -7,8 +7,15 @@ import re
 import os
 
 
-# --- Helper Function: Création du Prompt pour Q/A (MODIFIÉ pour plus de directivité et un exemple) ---
-def _create_qa_generation_prompt(text_segment: str, title: str, entities: list, lang:str) -> str:
+def _create_qa_generation_prompt(text_segment: str, title: str, entities: list, lang: str) -> str:
+    """
+    Create a prompt for the LLM to generate a question and answer based on the provided text segment, title, entities, and language.
+    :param text_segment: The text segment to analyze.
+    :param title: The title of the article or document from which the text segment is extracted.
+    :param entities: A list of entities mentioned in the text segment, which can be tuples or strings.
+    :param lang: The language in which the question and answer should be generated (e.g., 'fr' for French).
+    :return: A formatted prompt string for the LLM.
+    """
     if entities and isinstance(entities[0], tuple):
         entities_str = ", ".join([str(ent[0]) for ent in entities if ent and ent[0]])
     elif entities and isinstance(entities[0], str):
@@ -16,58 +23,74 @@ def _create_qa_generation_prompt(text_segment: str, title: str, entities: list, 
     else:
         entities_str = "aucune entité spécifique notable"
 
-    max_segment_display_len = 1500
+    max_segment_display_len = 1800
     text_segment_for_prompt_display = text_segment
     if len(text_segment) > max_segment_display_len:
         text_segment_for_prompt_display = text_segment[
                                           :max_segment_display_len] + " ... (segment tronqué pour affichage prompt)"
 
-    prompt = f"""Tu es un assistant expert en analyse de texte. Ta tâche est de générer une question, sa réponse, et un score de confiance à partir de l'extrait de texte fourni.
-L'extrait provient de l'article intitulé "{title}" et mentionne potentiellement les entités : [{entities_str}].
+    prompt = f"""Tu es un assistant expert en analyse de texte, programmé pour formuler des questions pertinentes et naturelles à partir d'extraits de documents.
+L'article original concerne "{title}". L'extrait actuel que tu dois analyser mentionne potentiellement les entités suivantes : [{entities_str}].
 
 Extrait de texte à analyser :
 ---
 {text_segment_for_prompt_display}
 ---
 
-Instructions STRICTES pour la génération :
-1.  **Question :** Doit commencer EXACTEMENT par "Question: ". Génère UNE question concise et pertinente à laquelle l'extrait répond. Si l'extrait ne permet pas de formuler une question claire et une réponse factuelle, écris "Question: N/A". NE PAS NUMÉROTER cette ligne.
-2.  **Réponse :** Doit commencer EXACTEMENT par "Réponse: ". Fournis la réponse directe et concise, basée UNIQUEMENT sur l'extrait. Si la Question est N/A, écris "Réponse: N/A". NE PAS NUMÉROTER cette ligne.
-3.  **Confiance\_LLM :** Doit commencer EXACTEMENT par "Confiance\_LLM: ". Fournis un score flottant entre 0.0 et 1.0. Si la Question est N/A, écris "Confiance\_LLM: 0.0". NE PAS NUMÉROTER cette ligne. NE RIEN AJOUTER sur cette ligne après le score numérique.
-4.  **Langue :** Il faut générer la question et la réponse dans cette langue : {lang}
+INSTRUCTIONS DÉTAILLÉES ET IMPÉRATIVES POUR TA PRODUCTION :
 
-Voici un EXEMPLE de format de sortie PARFAITEMENT RESPECTÉ :
-Question: Quelle est la capitale de la France ?
-Réponse: Paris.
-Confiance_LLM: 0.9
+1.  **Génération de la Question :**
+    * Ta question DOIT commencer EXACTEMENT par la chaîne "Question: " (sans numéro devant).
+    * Formule UNE question claire, concise, et précise qui porte sur une information saillante, spécifique et non triviale de l'extrait.
+    * **Important :** La question doit être formulée de manière naturelle, comme si un utilisateur la posait pour obtenir une information, SANS faire référence explicitement à l'extrait lui-même. La question doit pouvoir être comprise de manière autonome.
+    * Si possible, la question devrait impliquer le sujet principal de l'article ("{title}") ou les entités fournies ([{entities_str}]), en cherchant à clarifier leur rôle, leurs actions, ou leurs liens.
+    * Si l'extrait est trop court, vide, ou ne contient aucune information substantielle permettant de formuler une question de qualité respectant ces critères, la ligne entière doit être "Question: N/A".
+    * NE PAS numéroter cette ligne "Question:".
 
-Ta production doit suivre IMPÉRATIVEMENT ce format, chaque item sur une nouvelle ligne distincte :
+2.  **Génération de la Réponse :**
+    * Ta réponse DOIT commencer EXACTEMENT par la chaîne "Réponse: " (sans numéro devant), sur une nouvelle ligne distincte immédiatement après la question.
+    * Fournis une réponse directe, factuelle et concise à la question que tu as formulée.
+    * La réponse DOIT être extraite ou directement et sans ambiguïté inférable EXCLUSIVEMENT à partir des informations présentes dans l'"Extrait de texte à analyser" fourni ci-dessus. N'utilise AUCUNE connaissance extérieure.
+    * Si la question est "N/A", la ligne entière pour la réponse DOIT être "Réponse: N/A".
+    * NE PAS numéroter cette ligne "Réponse:".
+
+3.  **Score de Confiance :**
+    * Ton score de confiance DOIT commencer EXACTEMENT par la chaîne "Confiance_LLM: " (sans numéro devant), sur une nouvelle ligne distincte immédiatement après la réponse.
+    * Attribue un score numérique flottant unique (par exemple 0.75, 0.9, 1.0) entre 0.0 et 1.0. Ce score doit refléter ta confiance absolue dans la clarté et la non-ambiguïté avec lesquelles l'extrait supporte la paire question/réponse que tu as générée.
+    * Si la question est "N/A", le score de confiance DOIT être "0.0".
+    * NE PAS numéroter cette ligne "Confiance_LLM:". NE RIEN ajouter après le score numérique sur cette ligne.
+
+4.  **Langue :** La question et la réponse DOIVENT être générées dans la langue suivante : {lang}.
+
+RAPPEL DU FORMAT DE SORTIE STRICTEMENT ATTENDU (TROIS LIGNES DISTINCTES UNIQUEMENT) :
+Question: [Contenu de ta question naturelle et spécifique ou N/A]
+Réponse: [Contenu de ta réponse concise et factuelle ou N/A]
+Confiance_LLM: [Score numérique entre 0.0 et 1.0]
+
+Commence ta production directement par "Question:".
 """
-    # Laisser le LLM compléter après "Ta production :"
     return prompt
 
 
-# --- Helper Function: Parsing de la Sortie LLM (MODIFIÉE pour plus de robustesse) ---
 def _parse_llm_qa_output(llm_output: str) -> dict:
+    """
+    Parse the output from the LLM to extract the generated question, answer, and confidence score.
+    :param llm_output: The raw output string from the LLM, which should contain the question, answer, and confidence score.
+    :return: A dictionary containing the parsed question, answer, and confidence score.
+    """
     question = None
     answer = None
     llm_confidence = 0.0
 
-    # Nettoyer les lignes vides potentielles au début et à la fin, et les espaces en début/fin de chaque ligne
     cleaned_lines = [line.strip() for line in llm_output.strip().splitlines() if line.strip()]
     cleaned_output_for_regex = "\n".join(cleaned_lines)
 
-    # DEBUG:
-    # print(f"--- _parse_llm_qa_output: Tentative de parsing de (nettoyé) ---\n{cleaned_output_for_regex}\n---")
-
-    # Regex pour capturer le contenu après les tags.
-    # On s'attend à ce que chaque tag soit au début de sa ligne.
-    # (.*) capturera le reste de la ligne.
-    q_match = re.search(r"^Question:\s*(.*)", cleaned_output_for_regex, re.MULTILINE | re.IGNORECASE)
-    a_match = re.search(r"^Réponse:\s*(.*)", cleaned_output_for_regex, re.MULTILINE | re.IGNORECASE)
-    # Pour la confiance, capturer le nombre, tolérer des points de suspension ou autre chose après, mais on ne prend que le nombre.
-    c_match = re.search(r"^Confiance_LLM:\s*([0-1](?:\.[0-9]+)?)(?:.*)", cleaned_output_for_regex,
-                        re.MULTILINE | re.IGNORECASE)  # Modifié ici
+    q_match = re.search(r"^(?:[0-9]+\s*[\.\-]?\s*)?Question:\s*(.*)", cleaned_output_for_regex,
+                        re.MULTILINE | re.IGNORECASE)
+    a_match = re.search(r"^(?:[0-9]+\s*[\.\-]?\s*)?Réponse:\s*(.*)", cleaned_output_for_regex,
+                        re.MULTILINE | re.IGNORECASE)
+    c_match = re.search(r"^(?:[0-9]+\s*[\.\-]?\s*)?Confian(?:ce|dence)_LLM:\s*([0-1](?:\.[0-9]+)?)(?:.*)",
+                        cleaned_output_for_regex, re.MULTILINE | re.IGNORECASE)
 
     if q_match:
         question_content = q_match.group(1).strip()
@@ -75,10 +98,6 @@ def _parse_llm_qa_output(llm_output: str) -> dict:
             question = None
         else:
             question = question_content
-    else:
-        if "N/A" not in cleaned_output_for_regex.upper():  # Ne pas loguer si c'est un N/A global
-            print(
-                f"[AVERTISSEMENT _parse_llm_qa_output] Tag 'Question:' non trouvé. Sortie (début): '{cleaned_output_for_regex[:200].replace(os.linesep, ' ')}...'")
 
     if a_match:
         answer_content = a_match.group(1).strip()
@@ -86,24 +105,14 @@ def _parse_llm_qa_output(llm_output: str) -> dict:
             answer = None
         else:
             answer = answer_content
-    else:
-        if question is not None and "N/A" not in cleaned_output_for_regex.upper():
-            print(
-                f"[AVERTISSEMENT _parse_llm_qa_output] Tag 'Réponse:' non trouvé (Question était: '{str(question)[:50]}...'). Sortie (début): '{cleaned_output_for_regex[:200].replace(os.linesep, ' ')}...'")
 
     if c_match:
         try:
-            llm_confidence = float(c_match.group(1).strip())
+            llm_confidence = float(c_match.group(1))
         except ValueError:
-            print(
-                f"[AVERTISSEMENT _parse_llm_qa_output] Impossible de convertir score Confiance_LLM: '{c_match.group(1).strip()}'. Utilisation de 0.0.")
             llm_confidence = 0.0
     else:
-        if question is None and answer is None:  # Si Q et A sont N/A (donc None ici)
-            llm_confidence = 0.0
-        elif "N/A" not in cleaned_output_for_regex.upper():  # Si ce n'est pas un N/A global
-            print(
-                f"[AVERTISSEMENT _parse_llm_qa_output] Tag 'Confiance_LLM:' non trouvé ou format score incorrect. Sortie (début): '{cleaned_output_for_regex[:200].replace(os.linesep, ' ')}...'. Confiance mise à 0.0.")
+        if question is None and answer is None:
             llm_confidence = 0.0
 
     if question is None and answer is None and llm_confidence == 0.0:
@@ -111,7 +120,6 @@ def _parse_llm_qa_output(llm_output: str) -> dict:
         is_explicit_na_response = ("QUESTION: N/A" in raw_output_upper and
                                    "RÉPONSE: N/A" in raw_output_upper and
                                    ("CONFIANCE_LLM: 0.0" in raw_output_upper or "CONFIANCE_LLM: 0" in raw_output_upper))
-
         if not is_explicit_na_response and raw_output_upper.strip() != "N/A":
             print(
                 f"[AVERTISSEMENT _parse_llm_qa_output] Aucun champ Q, A valide n'a été parsé et ce n'est pas un N/A explicite. Format LLM probablement incorrect. Sortie NETTOYÉE (début): '{cleaned_output_for_regex[:300].replace(os.linesep, ' ')}...'")
@@ -123,19 +131,31 @@ def _parse_llm_qa_output(llm_output: str) -> dict:
     }
 
 
-# --- Fonction Principale de Traitement en Batchs ---
 def process_segments_in_batches(
         segments_data: List[Dict],
         llm_qab_model: Any,
         llm_qab_tokenizer: Any,
         bert_score_model_type: str = "bert-base-multilingual-cased",
-        batch_size_llm: int = 8,  # RÉDUIT POUR DÉBOGAGE FIN, AUGMENTE SUR H100 (ex: 64, 128)
-        batch_size_bertscore: int = 32,  # Idem
+        batch_size_llm: int = 8,
+        batch_size_bertscore: int = 32,
         device: str = "cuda" if torch.cuda.is_available() else "cpu",
-        max_new_tokens_qa: int = 300,
-        temperature_qa: float = 0.3  # Gardé bas pour plus de respect du format
+        max_new_tokens_qa: int = 250,
+        temperature_qa: float = 0.3
 ) -> List[Dict]:
-    # ... (Début de la fonction inchangé : initialisation de all_processed_segments, boucle tqdm) ...
+    """
+Process segments of text data in batches to generate questions and answers using a language model (LLM) and evaluate them with BERTScore.
+    :param segments_data: List of dictionaries containing segment data, each with keys like 'text_segment', 'title', 'entities', and 'lang'.
+    :param llm_qab_model: The language model to use for question and answer generation.
+    :param llm_qab_tokenizer: The tokenizer corresponding to the language model for question and answer generation.
+    :param bert_score_model_type: A string indicating the BERT model type to use for scoring (default is "bert-base-multilingual-cased").
+    :param batch_size_llm: The batch size for processing segments with the LLM.
+    :param batch_size_bertscore: The batch size for calculating BERTScore.
+    :param device: The device to run the model on, either 'cuda' for GPU or 'cpu'.
+    :param max_new_tokens_qa: The maximum number of new tokens to generate for each question and answer pair.
+    :param temperature_qa: The temperature parameter for controlling the randomness of the LLM output (default is 0.3).
+    :return: A list of dictionaries containing the original segment data along with the generated question, answer, LLM confidence score, and BERTScore F1 score.
+    """
+
     all_processed_segments = []
     num_segments = len(segments_data)
 
@@ -143,9 +163,6 @@ def process_segments_in_batches(
         llm_qab_tokenizer.pad_token = llm_qab_tokenizer.eos_token
         print(
             f"[INFO process_segments_in_batches] pad_token_id for llm_qab_tokenizer set to eos_token_id: {llm_qab_tokenizer.eos_token_id}")
-    if llm_qab_tokenizer.padding_side != 'left':
-        print(
-            f"[AVERTISSEMENT process_segments_in_batches] llm_qab_tokenizer.padding_side n'est pas 'left' ({llm_qab_tokenizer.padding_side}). Pour la génération en batch, 'left' est souvent recommandé et a été défini dans le script principal.")
 
     for i in tqdm(range(0, num_segments, batch_size_llm), desc="Traitement des lots de segments pour Q/A"):
         current_batch_input_data = segments_data[i:i + batch_size_llm]
@@ -157,9 +174,11 @@ def process_segments_in_batches(
 
         for seg_data in current_batch_input_data:
             text_s = seg_data.get('text_segment', "")
-            if text_s and text_s.strip() and len(text_s.split()) > 7:
+            if text_s and text_s.strip():
                 prompts_batch.append(
-                    _create_qa_generation_prompt(text_s, seg_data.get('title', 'N/A'), seg_data.get('entities', []),
+                    _create_qa_generation_prompt(text_s,
+                                                 seg_data.get('title', 'Titre inconnu'),
+                                                 seg_data.get('entities', []),
                                                  seg_data.get('lang', 'fr'))
                 )
                 valid_segments_for_llm_call.append(seg_data)
@@ -167,19 +186,19 @@ def process_segments_in_batches(
                 all_processed_segments.append({
                     **seg_data, "generated_question": None, "generated_answer": None,
                     "llm_confidence": 0.0, "bert_score_f1": 0.0,
-                    "error_qab_generation": "Segment initial vide ou trop court (< ~7 mots)"
+                    "error_qab_generation": "Texte segment vide ou invalide"
                 })
 
         if not prompts_batch:
             continue
 
-        if i == 0:
+        if i == 0 and prompts_batch:
             print(
                 f"\n--- Prompt Q/A (segment 0 du batch 0) ---\n{prompts_batch[0]}\n------------------------------------------\n")
 
         inputs = llm_qab_tokenizer(
             prompts_batch, return_tensors="pt", padding=True, truncation=True,
-            max_length=1800  # Ajusté, dépend de la longueur max de tes segments + prompt
+            max_length=1800
         ).to(device)
 
         batch_responses_text_list = [""] * len(prompts_batch)
@@ -189,15 +208,13 @@ def process_segments_in_batches(
                 attention_mask=inputs.attention_mask,
                 max_new_tokens=max_new_tokens_qa,
                 temperature=temperature_qa,
-                do_sample=(temperature_qa > 0.0),  # do_sample=True si temperature > 0
+                do_sample=(temperature_qa > 0.001),
                 pad_token_id=llm_qab_tokenizer.pad_token_id,
-                eos_token_id=llm_qab_tokenizer.eos_token_id,
-                # repetition_penalty=1.1 # MODIFICATION : Peut aider à éviter les répétitions et forcer le format
+                eos_token_id=llm_qab_tokenizer.eos_token_id
             )
 
             for k_resp in range(generated_ids_batch.shape[0]):
                 start_decode_index = inputs['input_ids'].shape[1]
-                # MODIFICATION : Ajout de clean_up_tokenization_spaces=True
                 decoded_text = llm_qab_tokenizer.decode(
                     generated_ids_batch[k_resp, start_decode_index:],
                     skip_special_tokens=True,
@@ -205,14 +222,12 @@ def process_segments_in_batches(
                 ).strip()
                 batch_responses_text_list[k_resp] = decoded_text
 
-                # MODIFICATION : Affiche la sortie brute pour TOUS les items du PREMIER BATCH pour un meilleur débogage
                 if i == 0:
                     print(
                         f"\n--- Sortie Brute LLM (batch 0, segment {k_resp} / ID original: {valid_segments_for_llm_call[k_resp].get('original_doc_id', 'N/A')}) ---\n{decoded_text}\n--------------------------------------------------\n")
 
         except Exception as e:
             print(f"[ERREUR] Échec de la génération LLM pour batch {i // batch_size_llm} : {e}")
-            # ... (gestion d'erreur comme avant) ...
             for seg_data_error in valid_segments_for_llm_call:
                 all_processed_segments.append({
                     **seg_data_error, "generated_question": None, "generated_answer": None,
@@ -223,7 +238,6 @@ def process_segments_in_batches(
 
         parsed_qas_batch = [_parse_llm_qa_output(output_txt) for output_txt in batch_responses_text_list]
 
-        # ... (Partie BERTScore et assemblage des résultats - reste identique à ma réponse précédente) ...
         original_texts_for_bertscore = [seg['text_segment'] for seg in valid_segments_for_llm_call]
         generated_answers_for_bertscore = [pqa['generated_answer'] if pqa and pqa.get('generated_answer') else "" for
                                            pqa in parsed_qas_batch]
@@ -237,17 +251,18 @@ def process_segments_in_batches(
         if indices_with_valid_answers:
             answers_to_score = [generated_answers_for_bertscore[k] for k in indices_with_valid_answers]
             originals_to_score = [original_texts_for_bertscore[k] for k in indices_with_valid_answers]
+            langs_of_answers_to_score = [langs_for_bertscore[k] for k in indices_with_valid_answers]
 
-            unique_langs_in_batch = sorted(list(set(
-                lang for idx_lang, lang in enumerate(langs_for_bertscore) if idx_lang in indices_with_valid_answers)))
+            unique_langs_in_score_batch = sorted(list(set(langs_of_answers_to_score)))
 
-            for lang_bs in unique_langs_in_batch:
-                lang_specific_indices_in_batch = [k for k in indices_with_valid_answers if
-                                                  langs_for_bertscore[k] == lang_bs]
-                if not lang_specific_indices_in_batch: continue
+            for lang_bs in unique_langs_in_score_batch:
+                current_lang_sub_indices = [sub_idx for sub_idx, original_batch_idx in
+                                            enumerate(indices_with_valid_answers) if
+                                            langs_for_bertscore[original_batch_idx] == lang_bs]
+                if not current_lang_sub_indices: continue
 
-                lang_answers = [generated_answers_for_bertscore[k] for k in lang_specific_indices_in_batch]
-                lang_originals = [original_texts_for_bertscore[k] for k in lang_specific_indices_in_batch]
+                lang_answers = [answers_to_score[sub_idx] for sub_idx in current_lang_sub_indices]
+                lang_originals = [originals_to_score[sub_idx] for sub_idx in current_lang_sub_indices]
 
                 try:
                     if lang_answers and lang_originals:
@@ -256,9 +271,12 @@ def process_segments_in_batches(
                             model_type=bert_score_model_type, device=device,
                             batch_size=batch_size_bertscore, verbose=False
                         )
-                        f1_iter_lang = iter(f1_temp_lang)
-                        for real_idx_in_valid_segments in lang_specific_indices_in_batch:
-                            bert_f1_scores_for_batch[real_idx_in_valid_segments] = round(next(f1_iter_lang).item(), 4)
+                        for list_idx_in_lang_batch, original_batch_idx_in_valid_segments in enumerate(
+                                current_lang_sub_indices):
+                            actual_index_in_bert_f1_scores = indices_with_valid_answers[
+                                original_batch_idx_in_valid_segments]
+                            bert_f1_scores_for_batch[actual_index_in_bert_f1_scores] = round(
+                                f1_temp_lang[list_idx_in_lang_batch].item(), 4)
                 except Exception as e:
                     print(f"[ERREUR] Calcul BERTScore pour batch (lang: {lang_bs}) échoué : {e}")
 

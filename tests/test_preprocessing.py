@@ -13,8 +13,8 @@ from preprocessing.pretraitment import preprocess_data
 print("[INFO] - Starting the application...")
 
 languages = ['fr', 'en']
-max_docs_per_lang = 10
-nb_chunk_for_parallel_ner = 2
+max_docs_per_lang = 1000
+nb_chunk_for_parallel_ner = 20
 
 llm_model_name_for_qa = "mistralai/Mistral-7B-Instruct-v0.3"
 device = "cuda" if torch.cuda.is_available() else "cpu"
