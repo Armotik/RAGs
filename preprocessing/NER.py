@@ -1,4 +1,5 @@
 import pandas as pd
+import torch.cuda
 from transformers import AutoTokenizer, AutoModelForTokenClassification, pipeline
 import ast
 
@@ -62,6 +63,11 @@ def enrich_df_with_ner_pipe(df_chunk: pd.DataFrame) -> pd.DataFrame:
         meta = df_chunk.at[index, "meta"]
         meta["entities"] = final_ents
         df_chunk.at[index, "meta"] = meta
+
+    torch.cuda.empty_cache()
+    del bert_ner
+    del tokenizer
+    del model
 
     return df_chunk
 
