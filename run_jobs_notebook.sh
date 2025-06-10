@@ -1,7 +1,7 @@
 #!/bin/bash
 
 #SBATCH --partition=gpu-a40
-#SBATCH --time=02:00:00
+#SBATCH --time=16:00:00
 #SBATCH --job-name=JupyterNotebook
 #SBATCH --output=job-%j.out
 #SBATCH --error=job-%j.err

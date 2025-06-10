@@ -7,7 +7,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=32
 #SBATCH --mem=200GB
-#SBATCH --gres=gpu:3
+#SBATCH --gres=gpu:4
 
 module load Anaconda3
 source /opt/easybuild/software/Anaconda3/2024.02-1/etc/profile.d/conda.sh

@@ -17,6 +17,13 @@
             </Attribute>
           </value>
         </entry>
+        <entry key="/benchmarks/question_answering/qa_generation_benchmark_results.csv">
+          <value>
+            <Attribute>
+              <option name="separator" value="," />
+            </Attribute>
+          </value>
+        </entry>
         <entry key="/tests/test.csv">
           <value>
             <Attribute>
