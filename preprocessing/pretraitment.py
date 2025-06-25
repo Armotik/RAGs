@@ -1,31 +1,102 @@
+# preprocessing/pretraitment.py
+import ast
 import os
 import pandas as pd
-import numpy as np
-from joblib import Parallel, delayed
 from tqdm import tqdm
 import torch
-import torch.multiprocessing as mp
 import datetime
-import ast
+import math
+import torch.multiprocessing as mp
+import gc
+from queue import Empty
+from joblib import Parallel, delayed
+import numpy as np
 
-# Importation des modules du projet
+# --- Imports des modules du projet ---
+from .qa_handler import qa_generation_worker, log_gpu_memory
 from .chunking import chunking
 from .content_extraction import load_lang
 from .text_cleaning import clean_text
 from .date_extraction import extract_date
 from .NER import enrich_df_with_ner_pipe
-from .qa_handler import process_segments_for_qa
 
 
-def qa_worker(segment_subset, gpu_id, model_id, batch_size):
+# --- Wrapper pour exécuter le NER dans un processus isolé ---
+def run_ner_in_process(df_input_path: str, df_output_path: str):
     """
-    Fonction wrapper pour appeler le traitement QA sur un sous-ensemble de données.
+    Charge un DataFrame, exécute le NER en utilisant le GPU, et sauvegarde le résultat.
     """
-    return process_segments_for_qa(
-        segments_data=segment_subset,
-        model_id=model_id,
-        device=f"cuda:{gpu_id}",
-    )
+    print("[NER PROCESS] Démarrage du processus NER isolé sur GPU...")
+    try:
+        df_to_process = pd.read_parquet(df_input_path)
+        print(f"[NER PROCESS] Fichier d'entrée chargé, {len(df_to_process)} lignes à traiter.")
+
+        if df_to_process.empty:
+            df_to_process.to_parquet(df_output_path)
+            return
+
+        df_enriched = enrich_df_with_ner_pipe(df_to_process)
+        df_enriched.to_parquet(df_output_path)
+        print(f"[NER PROCESS] Traitement NER terminé. {len(df_enriched)} lignes enrichies sauvegardées.")
+
+    except Exception as e:
+        print(f"[NER PROCESS] [ERREUR] Le processus NER a échoué: {e}")
+        pd.DataFrame().to_parquet(df_output_path)
+    finally:
+        print("[NER PROCESS] Processus NER terminé.")
+
+
+def process_segments_multi_gpu(segments_for_qab: list, llm_model_name: str, qa_params: dict) -> list:
+    """
+    Orchestrateur Q/A optimisé pour utiliser toutes les ressources GPU disponibles.
+    """
+    all_processed_segments = []
+    processes = []
+
+    try:
+        num_gpus = torch.cuda.device_count()
+        if num_gpus == 0: return []
+
+        num_workers = num_gpus
+        print(f"[Q/A ORCHESTRATEUR] Utilisation de {num_workers} workers sur {num_gpus} GPUs.")
+
+        manager = mp.Manager()
+        tasks_queue = manager.Queue()
+        results_queue = manager.Queue()
+        stop_event = manager.Event()
+
+        chunk_size = qa_params.get('batch_size_llm', 128)
+        total_chunks = math.ceil(len(segments_for_qab) / chunk_size)
+        if total_chunks == 0: return []
+
+        for i in range(0, len(segments_for_qab), chunk_size):
+            tasks_queue.put(segments_for_qab[i:i + chunk_size])
+
+        for _ in range(num_workers):
+            tasks_queue.put(None)
+
+        for worker_id in range(num_workers):
+            p = mp.Process(target=qa_generation_worker,
+                           args=(tasks_queue, results_queue, stop_event, worker_id, worker_id, llm_model_name,
+                                 qa_params))
+            processes.append(p)
+            p.start()
+
+        with tqdm(total=total_chunks, desc="Génération Q/A") as pbar:
+            for _ in range(total_chunks):
+                if stop_event.is_set():
+                    raise RuntimeError("Erreur OOM signalée par un worker Q/A.")
+                all_processed_segments.extend(results_queue.get(timeout=None))
+                pbar.update(1)
+
+    finally:
+        print("[Q/A ORCHESTRATEUR] Nettoyage des workers...")
+        for p in processes:
+            p.join(timeout=10)
+            if p.is_alive(): p.terminate()
+        print("[Q/A ORCHESTRATEUR] Workers arrêtés.")
+
+    return all_processed_segments
 
 
 def preprocess_data(
@@ -36,82 +107,82 @@ def preprocess_data(
         new_docs=False
 ) -> pd.DataFrame:
     """
-    Pipeline de prétraitement principal, avec parallélisation de la génération Q/A.
+    Fonction principale avec isolation du processus NER et gestion mémoire robuste.
     """
     t_time = datetime.datetime.now()
     save_dir = 'data'
     os.makedirs(save_dir, exist_ok=True)
-    checkpoint_file_path = os.path.join(save_dir, "df_full_pipeline_output.parquet")
-    checkpoint_flag_path = os.path.join(save_dir, "checkpoint_full_pipeline.json")
 
-    if os.path.exists(checkpoint_flag_path) and not new_docs:
-        print(f"[INFO] Chargement des données entièrement traitées depuis : {checkpoint_file_path}")
-        return pd.read_parquet(checkpoint_file_path)
+    final_output_path = os.path.join(save_dir, "final_qab_data.parquet")
 
-    print("[INFO] Lancement du prétraitement complet (pas de checkpoint valide ou new_docs=True).")
+    if not new_docs and os.path.exists(final_output_path):
+        print(f"[MAIN] Chargement depuis le checkpoint : {final_output_path}")
+        return pd.read_parquet(final_output_path)
 
-    # --- Étape 1: Chargement et Nettoyage ---
-    print(f"[INFO] Étape 1: Chargement et nettoyage des documents...")
-    time_load = datetime.datetime.now()
-    results_load = Parallel(n_jobs=len(languages))(delayed(load_lang)(lang, max_docs_per_lang) for lang in languages)
-    df = pd.DataFrame([doc for lang_docs in results_load for doc in lang_docs])
+    print(f"[MAIN] Début du prétraitement complet.")
+
+    print(f"[MAIN] Chargement des documents...")
+    all_docs = [doc for lang in languages for doc in load_lang(lang, max_docs_per_lang)]
+    df = pd.DataFrame(all_docs)
+    del all_docs
+    gc.collect()
+
     if df.empty: return df
     df["title"] = df["title"].apply(clean_text)
     df["text"] = df["text"].apply(clean_text)
-    print(f"[INFO] Chargement et nettoyage terminés en {datetime.datetime.now() - time_load}")
+    df_initial_chunks = chunking(df, 0)
+    del df
+    gc.collect()
 
-    # --- Étape 2: Chunking et Extraction de Dates ---
-    print(f"[INFO] Étape 2: Chunking et extraction de dates...")
-    df_chunks = chunking(df, 0)
-    if df_chunks.empty: return df_chunks
-    df_chunks = extract_date(df_chunks)
+    if df_initial_chunks.empty: return df_initial_chunks
+    df_initial_chunks = extract_date(df_initial_chunks)
+    df_initial_chunks['meta'] = df_initial_chunks['meta'].apply(
+        lambda x: ast.literal_eval(x) if isinstance(x, str) else (x if isinstance(x, dict) else {}))
 
-    # --- Étape 3: Extraction d'Entités (NER) en parallèle ---
-    print(f"[INFO] Étape 3: Enrichissement NER en parallèle...")
-    ner_chunks_split = np.array_split(df_chunks, nb_chunk_for_parallel_ner if nb_chunk_for_parallel_ner > 0 else 1)
-    results_ner = Parallel(n_jobs=min(nb_chunk_for_parallel_ner, os.cpu_count()))(
-        delayed(enrich_df_with_ner_pipe)(chunk.copy()) for chunk in tqdm(ner_chunks_split, desc="NER Processing")
-    )
-    df_ner_enriched = pd.concat([r for r in results_ner if r is not None and not r.empty], ignore_index=True).dropna(
-        subset=['text'])
+    ner_input_path = os.path.join(save_dir, "temp_ner_input.parquet")
+    ner_output_path = os.path.join(save_dir, "temp_ner_output.parquet")
+    df_initial_chunks.to_parquet(ner_input_path)
+    del df_initial_chunks
+    gc.collect()
 
-    if df_ner_enriched.empty:
-        print("[AVERTISSEMENT] DataFrame vide après l'étape NER. Arrêt.")
+    print("[MAIN] Lancement du processus NER isolé sur GPU...")
+    ner_process = mp.Process(target=run_ner_in_process, args=(ner_input_path, ner_output_path))
+    ner_process.start()
+    ner_process.join()
+    print("[MAIN] Le processus NER est terminé.")
+
+    if not os.path.exists(ner_output_path) or os.path.getsize(ner_output_path) == 0:
+        print("[ERREUR FATALE] Le processus NER a échoué.")
+        if os.path.exists(ner_input_path): os.remove(ner_input_path)
+        if os.path.exists(ner_output_path): os.remove(ner_output_path)
         return pd.DataFrame()
 
-    # --- Étape 4: Génération de Q/A en parallèle sur les GPUs ---
-    print(f"\n[INFO] Étape 4: Lancement de la génération Q/A en parallèle...")
-    time_qa = datetime.datetime.now()
-    segments_for_qab = [row.to_dict() for _, row in df_ner_enriched.iterrows()]
+    df_ner_enriched = pd.read_parquet(ner_output_path)
+    os.remove(ner_input_path)
+    os.remove(ner_output_path)
 
-    num_gpus = torch.cuda.device_count()
-    if num_gpus > 0:
-        print(f"[INFO] {num_gpus} GPU(s) détecté(s). Distribution des {len(segments_for_qab)} segments.")
-        segment_chunks_per_gpu = np.array_split(segments_for_qab, num_gpus)
-        batch_size_per_gpu = 16
+    if torch.cuda.is_available(): log_gpu_memory("[MAIN]", "Après la fin du processus NER")
 
-        pool_args = [(chunks.tolist(), i, llm_model_name_for_qa, batch_size_per_gpu) for i, chunks in
-                     enumerate(segment_chunks_per_gpu) if len(chunks) > 0]
+    if df_ner_enriched.empty:
+        return df_ner_enriched
 
-        with mp.get_context("spawn").Pool(processes=num_gpus) as pool:
-            results_list = list(
-                tqdm(pool.starmap(qa_worker, pool_args), total=len(pool_args), desc="Generating QA on GPUs"))
+    segments_for_qab = [{**row.to_dict()} for _, row in df_ner_enriched.iterrows()]
+    del df_ner_enriched
+    gc.collect()
 
-        processed_qab_data = [item for sublist in results_list for item in sublist]
-    else:
-        print("[INFO] Aucun GPU détecté. Traitement sur CPU (très lent)...")
-        processed_qab_data = process_segments_for_qa(segments_for_qab, llm_model_name_for_qa, device="cpu")
+    qa_params = {"batch_size_llm": 128, "batch_size_bertscore": 256, "max_new_tokens_qa": 350, "temperature_qa": 0.3}
+    print(f"[MAIN] Lancement de la génération Q/A...")
 
-    print(f"[INFO] Génération Q/A terminée en {datetime.datetime.now() - time_qa}")
+    try:
+        all_processed_segments = process_segments_multi_gpu(segments_for_qab=segments_for_qab,
+                                                            llm_model_name=llm_model_name_for_qa, qa_params=qa_params)
+    except RuntimeError as e:
+        print(f"[ERREUR FATALE] {e}")
+        return pd.DataFrame()
 
-    df_final = pd.DataFrame(processed_qab_data)
+    df_contextual_chunks = pd.DataFrame(all_processed_segments)
+    df_contextual_chunks.to_parquet(final_output_path, index=False)
+    print(f"[MAIN] Données finales sauvegardées dans {final_output_path}")
 
-    # --- Étape 5: Sauvegarde Finale ---
-    print(f"[INFO] Étape 5: Sauvegarde des résultats finaux...")
-    df_final.to_parquet(checkpoint_file_path, index=False)
-    with open(checkpoint_flag_path, "w") as f:
-        f.write(f"Processed QAB at {datetime.datetime.now()}")
-    print(f"[INFO] Pipeline complet terminé. Résultats sauvegardés dans {checkpoint_file_path}")
-    print(f"Temps total d'exécution : {datetime.datetime.now() - t_time}")
-
-    return df_final
+    print(f"[MAIN] Prétraitement complet terminé en {datetime.datetime.now() - t_time}")
+    return df_contextual_chunks
