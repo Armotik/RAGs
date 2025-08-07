@@ -232,7 +232,6 @@ else :
             res_list = []
 
             try:
-                # On divise le texte sur les conjonctions
                 segments = [seg.strip() for seg in split_on_conjunctions(row["text"]) if
                             seg.strip().lower() not in ["et", "and", ",", ";"] and seg.strip() != ""]
 
@@ -270,7 +269,6 @@ else :
                             res["minute"] = result.minute if result.minute else None
                             res["second"] = result.second if result.second else None
 
-                            # False positive check
                             if res["day"] and res["month"] and not is_pure_date_expression(matched_text):
                                 break
 
@@ -431,12 +429,10 @@ def evaluate_model_massive_multigpu(model_name, model_path, corpus, meta, k=5):
     last_batch_completed = get_last_completed_batch(model_name)
     print(f"[INFO] Reprise à partir du batch {last_batch_completed + 1}...")
 
-    # Découpage du corpus selon le nombre de GPUs
     num_devices = len(available_devices)
     chunks = np.array_split(corpus, num_devices)
     devices = available_devices[:num_devices]
 
-    # Encodage parallèle sur plusieurs GPUs
     encoded_chunks = Parallel(n_jobs=num_devices)(
         delayed(encode_on_gpu)(chunk, model_path, device) for chunk, device in zip(chunks, devices)
     )
@@ -493,7 +489,7 @@ def evaluate_model_massive_multigpu(model_name, model_path, corpus, meta, k=5):
         "Corpus Languages": list(set(corpus_langs))
     }
 
-    # Sauvegarde des résultats dans un fichier CSV (temporaire)
+    # Sauvegarde des résultats dans un fichier CSV
     save_final_results(model_name, doc_embeddings, index, results_dict)
 
     return results_dict

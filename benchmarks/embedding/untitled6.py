@@ -423,10 +423,8 @@ def run_full_benchmark_massive():
         res = evaluate_model_massive(model_name, model_path, corpus, meta)
         all_results.append(res)
 
-        # Sauvegarder les embeddings pour chaque modèle séparément
         np.save(f"./_{model_name.replace('/', '_')}.npy", res["Vectors"])
 
-    # Nettoyer les résultats avant export (enlevant les gros vecteurs)
     for r in all_results:
         r.pop("Vectors", None)
 

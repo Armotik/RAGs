@@ -1,5 +1,3 @@
-import traceback
-
 import pandas as pd
 import torch
 import torch.multiprocessing as mp
@@ -20,18 +18,12 @@ from transformers import AutoTokenizer, AutoModelForTokenClassification, AutoMod
 
 tqdm.pandas(desc="Processing text")
 
-# Configuration de l'environnement pour Matplotlib (bonne pratique)
 matplotlib_cache_dir = './tmp/matplotlib_cache_amudet01'
 os.makedirs(matplotlib_cache_dir, exist_ok=True)
 os.environ['MPLCONFIGDIR'] = matplotlib_cache_dir
 
-# Vider le cache CUDA au début
 torch.cuda.empty_cache()
 
-# ==============================================================================
-# SÉLECTION DES MODÈLES QA À BENCHMARKER
-# C'est ici que vous pouvez configurer les modèles à tester.
-# ==============================================================================
 MODELS_TO_BENCHMARK = [
     {"model_id": "valhalla/t5-small-qg-hl", "size_category": "small"},
     {"model_id": "mrm8488/mT5-small-finetuned-tydiqa-for-xqa", "size_category": "small"},
@@ -41,14 +33,7 @@ MODELS_TO_BENCHMARK = [
 ]
 
 
-# ==============================================================================
-# SECTION 1: FONCTIONS DU PIPELINE DE PRÉTRAITEMENT COMPLET
-# ==============================================================================
-
 def load_lang(lang: str, max_docs: int) -> list:
-    """
-    Charge le dataset pour une langue spécifique et retourne une liste de documents.
-    """
     print(f"[{lang.upper()}] Chargement...")
     dataset_stream = load_dataset('miracl/miracl-corpus', lang, split='train', streaming=True, trust_remote_code=True)
     sample = islice(dataset_stream, max_docs) if max_docs > 0 else dataset_stream
@@ -57,7 +42,6 @@ def load_lang(lang: str, max_docs: int) -> list:
 
 
 def clean_text(text: str) -> str:
-    """Nettoie le texte en entrée."""
     text = unicodedata.normalize('NFKC', text)
     text = text.replace('“', '"').replace('”', '"').replace('«', '"').replace('»', '"').replace("’", "'")
     text = text.replace('\n', '. ')
@@ -76,7 +60,6 @@ def clean_text(text: str) -> str:
 
 
 def chunking(df: pd.DataFrame) -> pd.DataFrame:
-    """Découpe le dataframe en chunks plus petits."""
     chunk_text, chunk_meta = [], []
     for _, row in df.iterrows():
         sentences = row["text"].split(". ")
@@ -188,12 +171,12 @@ def enrich_df_with_ner_pipe(df_chunk: pd.DataFrame) -> pd.DataFrame:
     return df_chunk
 
 
-# ==============================================================================
-# SECTION 2: FONCTIONS POUR LE BENCHMARK DE GÉNÉRATION QA
-# ==============================================================================
-
 def qa_benchmark_worker_batch(args):
-    """Worker qui traite un lot de chunks et retourne les résultats."""
+    """
+    Worker pour le benchmark de génération de questions.
+    :param args: Tuple contenant les paramètres suivants: (chunks_subset, gpu_id, model_id, size_category).
+    :return: List de dictionnaires avec les résultats de génération et le temps total de génération.
+    """
     chunks_subset, gpu_id, model_id, size_category = args
     device = f'cuda:{gpu_id}'
 
@@ -221,27 +204,19 @@ def qa_benchmark_worker_batch(args):
 
         generated_outputs = qa_pipeline(input_texts, max_length=128, num_return_sequences=1, batch_size=batch_size)
 
-        # ### LA CORRECTION PRINCIPALE EST ICI ###
-        # On accède directement à output['generated_text'] sans le `[0]` incorrect.
         results = [{"chunk": chunks_subset[i], "generated_text": output['generated_text']} for i, output in
                    enumerate(generated_outputs)]
 
     except Exception as e:
         tqdm.write(f"ERREUR de génération sur GPU:{gpu_id} pour {model_id}. Type: {type(e).__name__}. Arrêt du worker.")
-        results = []  # Renvoie une liste vide en cas d'échec
+        results = []
 
     total_time = time.time() - start_time
     del qa_pipeline
     torch.cuda.empty_cache()
     return results, total_time
 
-
-# ==============================================================================
-# SECTION 3: FONCTION PRINCIPALE (SIMPLE ET ROBUSTE)
-# ==============================================================================
-
 def main():
-    """Orchestre le prétraitement et le benchmark."""
 
     checkpoint_file = "checkpoint__df_chunk_ready.parquet"
     if os.path.exists(checkpoint_file):

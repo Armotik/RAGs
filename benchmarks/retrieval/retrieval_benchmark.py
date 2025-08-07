@@ -49,7 +49,6 @@ def benchmark_rerankers_dual_retrieval_multigpu_safe(
     benchmarks = []
     devices = [f"cuda:{i}" for i in range(torch.cuda.device_count())]
 
-    # === 1. Dense retrieval depuis Milvus ===
     query_vec = ebd_model.encode(query, normalize_embeddings=True).tolist()
     dense_results = client.search(
         collection_name="rag_v1",
@@ -61,7 +60,6 @@ def benchmark_rerankers_dual_retrieval_multigpu_safe(
     )[0]
     dense_texts = [hit["entity"]["text"] for hit in dense_results]
 
-    # === 2. Multi-query fusion ===
     all_queries = [query] + variations
     all_vectors = ebd_model.encode(all_queries, normalize_embeddings=True)
     fusion_scores = {}
@@ -90,7 +88,6 @@ def benchmark_rerankers_dual_retrieval_multigpu_safe(
     sorted_fusion = sorted(fusion_scores.items(), key=lambda x: -x[1])[:top_k]
     fusion_texts_topk = [fusion_texts[doc_id] for doc_id, _ in sorted_fusion]
 
-    # === 3. Modèles avec fallback GPU dynamique ===
     for label, model_path in reranker_models.items():
         success = False
         for device in devices:
@@ -137,7 +134,7 @@ def benchmark_rerankers_dual_retrieval_multigpu_safe(
                 del reranker
                 torch.cuda.empty_cache()
                 success = True
-                break  # ne teste pas les autres GPUs si réussi
+                break
 
             except torch.cuda.OutOfMemoryError:
                 print(f"[WARNING] OOM sur {device} pour {label}. On passe au suivant...")

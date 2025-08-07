@@ -1,16 +1,13 @@
 # preprocessing/qa_handler.py
 from typing import List, Dict, Any
 import torch
-from bert_score import score as bert_scorer
 import re
-import os
 from transformers import AutoTokenizer, AutoModelForCausalLM
 import time
 import gc
 from queue import Empty
 
 def log_gpu_memory(worker_log_prefix: str, stage: str):
-    """Affiche un résumé détaillé de la mémoire du GPU actuel."""
     if not torch.cuda.is_available():
         return
     try:

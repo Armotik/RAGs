@@ -8,11 +8,7 @@ import datetime
 import math
 import torch.multiprocessing as mp
 import gc
-from queue import Empty
-from joblib import Parallel, delayed
-import numpy as np
 
-# --- Imports des modules du projet ---
 from .qa_handler import qa_generation_worker, log_gpu_memory
 from .chunking import chunking
 from .content_extraction import load_lang
@@ -21,10 +17,12 @@ from .date_extraction import extract_date
 from .NER import enrich_df_with_ner_pipe
 
 
-# --- Wrapper pour exécuter le NER dans un processus isolé ---
 def run_ner_in_process(df_input_path: str, df_output_path: str):
     """
-    Charge un DataFrame, exécute le NER en utilisant le GPU, et sauvegarde le résultat.
+    A function to run the NER process in a separate multiprocessing context.
+    :param df_input_path: The path to the input DataFrame in Parquet format.
+    :param df_output_path: The path to save the output DataFrame in Parquet format.
+    :return: None
     """
     print("[NER PROCESS] Démarrage du processus NER isolé sur GPU...")
     try:
@@ -48,7 +46,11 @@ def run_ner_in_process(df_input_path: str, df_output_path: str):
 
 def process_segments_multi_gpu(segments_for_qab: list, llm_model_name: str, qa_params: dict) -> list:
     """
-    Orchestrateur Q/A optimisé pour utiliser toutes les ressources GPU disponibles.
+    A function to process segments for Q/A generation using multiple GPUs.
+    :param segments_for_qab: List of segments to process for Q/A generation
+    :param llm_model_name: The name of the LLM model to use for Q/A generation
+    :param qa_params: Parameters for Q/A generation such as batch size and max tokens
+    :return: List of processed segments with Q/A generation results
     """
     all_processed_segments = []
     processes = []
@@ -107,8 +109,15 @@ def preprocess_data(
         new_docs=False
 ) -> pd.DataFrame:
     """
-    Fonction principale avec isolation du processus NER et gestion mémoire robuste.
+    Main function to preprocess data for Q/A generation.
+    :param languages: The list of languages to process
+    :param max_docs_per_lang: Maximum number of documents to load per language
+    :param nb_chunk_for_parallel_ner: Number of chunks for parallel NER processing
+    :param llm_model_name_for_qa: The name of the LLM model to use for Q/A generation
+    :param new_docs: Boolean flag to indicate if new documents should be processed
+    :return: pd.DataFrame containing the final processed data for Q/A generation
     """
+
     t_time = datetime.datetime.now()
     save_dir = 'data'
     os.makedirs(save_dir, exist_ok=True)
